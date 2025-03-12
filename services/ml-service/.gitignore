@@ -1,0 +1,8 @@
+# Dependencies
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.env
