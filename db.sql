@@ -177,7 +177,11 @@ CREATE TABLE configuracion_sistema (
 
 ALTER TABLE fuentes ADD CONSTRAINT unique_fuente_url UNIQUE (url);
 
-ALTER TABLE usuarios ADD COLUMN contrasena VARCHAR(255);
+ALTER TABLE usuarios ADD COLUMN contrasena VARCHAR;
 
 ALTER TABLE temas ADD CONSTRAINT unique_tema_nombre UNIQUE (nombre);
 
+ALTER TABLE fuentes 
+ALTER COLUMN confiabilidad SET DEFAULT 0.5,
+ADD COLUMN verdaderas INT DEFAULT 0,
+ADD COLUMN falsas INT DEFAULT 0;
