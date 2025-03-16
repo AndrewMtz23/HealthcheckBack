@@ -102,6 +102,7 @@ class Tema(db.Model):
     nombre = db.Column(db.String, nullable=False, unique=True)
     descripcion = db.Column(db.Text)
     activo = db.Column(db.Boolean, default=True)
+    palabras_clave = db.Column(db.Text) 
     
     # Relaciones
     noticias = db.relationship('Noticia', backref='tema', lazy=True)

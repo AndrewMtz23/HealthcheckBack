@@ -1,8 +1,10 @@
 from database.db import db
-from database.models import Fuente, Noticia, ModeloML, ClasificacionNoticia, HistorialConsulta
+from database.models import Fuente, Noticia, ModeloML, ClasificacionNoticia, HistorialConsulta, Tema
 from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime
 from urllib.parse import urlparse
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 import logging
 
 # Configuración básica de logging
@@ -41,7 +43,57 @@ def get_or_create_source(url):
         logger.error(f"Error al obtener o crear fuente: {str(e)}")
         raise
 
-def save_news(titulo, contenido, url, fecha_publicacion, fuente_id):
+def get_topics_from_db():
+    """Extrae los temas y sus palabras clave desde la base de datos usando SQLAlchemy."""
+    try:
+        temas = Tema.query.filter_by(activo=True).all()
+        
+        topic_keywords = {}
+        topic_ids = {}
+
+        for tema in temas:
+            if tema.palabras_clave:
+                topic_keywords[tema.nombre] = tema.palabras_clave.split(", ")
+                topic_ids[tema.nombre] = tema.id
+                
+        return topic_keywords, topic_ids
+    
+    except SQLAlchemyError as e:
+        logger.error(f"Error al obtener temas de la base de datos: {str(e)}")
+        return {}, {}
+
+def classify_topic(text):
+    """Asigna un tema basado en palabras clave obtenidas de la base de datos."""
+    try:
+        topic_keywords, topic_ids = get_topics_from_db()
+        
+        if not topic_keywords:
+            logger.warning("No se encontraron temas activos con palabras clave")
+            return "Sin clasificar", None
+        
+        topics = list(topic_keywords.keys())
+        documents = [" ".join(topic_keywords[topic]) for topic in topics]
+
+        vectorizer = TfidfVectorizer()
+        tfidf_matrix = vectorizer.fit_transform(documents + [text])
+        
+        similarities = cosine_similarity(tfidf_matrix[-1], tfidf_matrix[:-1]).flatten()
+        
+        best_match_index = similarities.argmax()
+        
+        # Si la mejor coincidencia tiene una similitud muy baja, no asignar tema
+        if similarities[best_match_index] < 0.01:  # Umbral arbitrario, ajustar según necesidad
+            return "Sin clasificar", None
+            
+        best_topic = topics[best_match_index]
+
+        return best_topic, topic_ids[best_topic]
+    
+    except Exception as e:
+        logger.error(f"Error al clasificar tema: {str(e)}")
+        return "Sin clasificar", None
+
+def save_news(titulo, contenido, url, fecha_publicacion, fuente_id, tema_id=None):
     """Guarda una noticia en la BD usando SQLAlchemy."""
     try:
         nueva_noticia = Noticia(
@@ -50,6 +102,7 @@ def save_news(titulo, contenido, url, fecha_publicacion, fuente_id):
             url=url,
             fecha_publicacion=fecha_publicacion,
             fuente_id=fuente_id,
+            tema_id=tema_id,
             created_at=datetime.utcnow()
         )
         db.session.add(nueva_noticia)

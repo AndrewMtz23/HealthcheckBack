@@ -1,8 +1,7 @@
 from flask import Blueprint, request, jsonify
 from core.classify_service import predict_news
 from utils.article_extractor import extract_news_data
-from utils.db_utils import get_or_create_source, save_news, get_active_model, save_classification, save_consultation
-from database.models import Noticia, ClasificacionNoticia
+from utils.db_utils import get_or_create_source, save_news, get_active_model, save_classification, save_consultation, classify_topic
 import logging
 
 # Configuración básica de logging
@@ -31,15 +30,6 @@ def classify():
 
             # Guardar fuente
             fuente_id = get_or_create_source(data["url"])
-
-            # Guardar noticia
-            noticia_id = save_news(
-                extracted_data["Título"],
-                extracted_data["Texto Completo"],
-                data["url"],
-                extracted_data["Fecha de Publicación"],
-                fuente_id
-            )
             text = extracted_data["Texto Completo"]
 
         elif "text" in data:
@@ -48,21 +38,26 @@ def classify():
                 "Título": "No disponible",
                 "Texto Completo": text,
                 "Autor": "Desconocido",
-                "Fecha de Publicación": "Desconocida"
+                "Fecha de Publicación": None
             }
-
-            # Guardar noticia sin URL
-            noticia_id = save_news(
-                extracted_data["Título"],
-                extracted_data["Texto Completo"],
-                None,
-                None,
-                None
-            )
+            fuente_id = None
         else:
             return jsonify({"error": "El JSON debe contener 'text' o 'url'."}), 400
 
-        # Clasificar la noticia con el modelo de ML
+        # PASO 1: Clasificar el Tema dinámicamente
+        tema_nombre, tema_id = classify_topic(text)
+        
+        # PASO 2: Guardar Noticia con su Tema
+        noticia_id = save_news(
+            extracted_data["Título"],
+            extracted_data["Texto Completo"],
+            data.get("url"),
+            extracted_data["Fecha de Publicación"],
+            fuente_id,
+            tema_id
+        )
+
+        # PASO 3: Clasificar Noticia como verdadera o falsa
         resultado, confianza, explicacion = predict_news(text)
 
         # Obtener el modelo activo
@@ -73,7 +68,7 @@ def classify():
         # Guardar clasificación
         clasificacion_id = save_classification(noticia_id, modelo_id, resultado, confianza, explicacion)
 
-        # Guardar en historial de consultas
+        # PASO 4: Guardar en historial de consultas
         consulta_id = None
         if usuario_id:
             consulta_id = save_consultation(usuario_id, noticia_id)
@@ -86,7 +81,8 @@ def classify():
             **extracted_data,
             "Clasificación": resultado,
             "Confianza": confianza,
-            "Explicación": explicacion
+            "Explicación": explicacion,
+            "Tema": tema_nombre
         }), 200
     
     except Exception as e:
