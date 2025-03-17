@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from core.classify_service import predict_news
 from utils.article_extractor import extract_news_data
 from utils.db_utils import get_or_create_source, save_news, get_active_model, save_classification, save_consultation, classify_topic, extract_keywords, save_news_keywords
+from scrapers.google_news import GoogleNewsScraper
 import logging
 
 # Configuración básica de logging
@@ -93,3 +94,30 @@ def classify():
     except Exception as e:
         logger.error(f"Error durante la clasificación: {str(e)}")
         return jsonify({"error": f"Error durante el procesamiento: {str(e)}"}), 500
+
+@classify_bp.route("/scrape", methods=["POST"])
+def scrape_news():
+    """Inicia el scraping de noticias desde Google News."""
+    try:
+        data = request.json or {}
+        
+        # Obtener parámetros
+        rss_url = data.get("rss_url")  # Si es None, usará la URL predeterminada
+        limit = data.get("limit", 5)  # Número de noticias a procesar, por defecto 5
+        
+        # Iniciar el scraper
+        scraper = GoogleNewsScraper()
+        processed_news_ids = scraper.scrape_news(rss_url, limit)
+        
+        return jsonify({
+            "status": "success",
+            "message": f"Se procesaron {len(processed_news_ids)} noticias correctamente.",
+            "processed_ids": processed_news_ids
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error durante el scraping: {str(e)}")
+        return jsonify({
+            "status": "error",
+            "message": f"Error durante el scraping: {str(e)}"
+        }), 500
