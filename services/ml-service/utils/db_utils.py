@@ -1,8 +1,12 @@
 from database.db import db
-from database.models import Fuente, Noticia, ModeloML, ClasificacionNoticia, HistorialConsulta, Tema
+from database.models import Fuente, Noticia, ModeloML, ClasificacionNoticia, HistorialConsulta, Tema, Keyword, NoticiaKeyword
 from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime
 from urllib.parse import urlparse
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from nltk.stem import WordNetLemmatizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import logging
@@ -10,6 +14,15 @@ import logging
 # Configuración básica de logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Descargar recursos de NLTK (debes ejecutar esto una vez)
+nltk.download("punkt")
+nltk.download("stopwords")
+nltk.download("wordnet")
+
+# Configurar el lematizador y las stopwords en español e inglés
+lemmatizer = WordNetLemmatizer()
+stop_words = set(stopwords.words("spanish") + stopwords.words("english"))
 
 def get_or_create_source(url):
     """Verifica si la fuente existe en la BD; si no, la crea usando SQLAlchemy."""
@@ -92,6 +105,96 @@ def classify_topic(text):
     except Exception as e:
         logger.error(f"Error al clasificar tema: {str(e)}")
         return "Sin clasificar", None
+
+def extract_keywords(text, num_keywords=5):
+    """Extrae palabras clave relevantes de un texto usando TF-IDF"""
+    try:
+        # Tokenizar el texto y eliminar stop words y lematizar
+        words = word_tokenize(text.lower())
+        words = [lemmatizer.lemmatize(word) for word in words if word.isalpha() and word not in stop_words]
+
+        if len(words) == 0:
+            return []
+
+        # Aplicar TF-IDF para obtener la relevancia de las palabras
+        vectorizer = TfidfVectorizer()
+        tfidf_matrix = vectorizer.fit_transform([' '.join(words)])
+
+        # Obtener los índices de las palabras más relevantes
+        feature_names = vectorizer.get_feature_names_out()
+        scores = tfidf_matrix.sum(axis=0).A1  # Sumar los puntajes TF-IDF de todas las palabras
+
+        # Crear un diccionario de palabras con sus respectivos puntajes
+        word_scores = dict(zip(feature_names, scores))
+
+        # Ordenar las palabras por relevancia (puntuación más alta)
+        sorted_word_scores = sorted(word_scores.items(), key=lambda x: x[1], reverse=True)
+
+        # Tomar las N palabras más relevantes
+        top_keywords = [word for word, score in sorted_word_scores[:num_keywords]]
+
+        return top_keywords
+    
+    except Exception as e:
+        logger.error(f"Error al extraer palabras clave con TF-IDF: {str(e)}")
+        # En caso de error, intentamos con el método simple de frecuencia
+        try:
+            if len(words) > 0:
+                freq_dist = nltk.FreqDist(words)
+                return [word for word, freq in freq_dist.most_common(num_keywords)]
+            return []
+        except:
+            return []
+
+def get_or_create_keyword(word):
+    """Busca una palabra clave en la base de datos o la inserta si no existe usando SQLAlchemy."""
+    try:
+        # Verificar si la keyword ya existe
+        keyword = Keyword.query.filter_by(palabra=word).first()
+
+        if keyword:
+            # Incrementar la relevancia en 1.0
+            keyword.relevancia = float(keyword.relevancia) + 1.0
+            db.session.commit()
+            return keyword.id
+        else:
+            # Crear una nueva keyword con relevancia inicial de 1.0
+            new_keyword = Keyword(
+                palabra=word,
+                relevancia=1.0
+            )
+            db.session.add(new_keyword)
+            db.session.commit()
+            return new_keyword.id
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        logger.error(f"Error al obtener o crear palabra clave: {str(e)}")
+        raise
+
+def save_news_keywords(noticia_id, keywords):
+    """Guarda la relación entre una noticia y sus palabras clave usando SQLAlchemy."""
+    try:
+        for word in keywords:
+            keyword_id = get_or_create_keyword(word)
+            
+            # Verificar si ya existe la relación
+            exists = NoticiaKeyword.query.filter_by(
+                noticia_id=noticia_id, 
+                keyword_id=keyword_id
+            ).first()
+            
+            if not exists:
+                noticia_keyword = NoticiaKeyword(
+                    noticia_id=noticia_id,
+                    keyword_id=keyword_id
+                )
+                db.session.add(noticia_keyword)
+        
+        db.session.commit()
+    except SQLAlchemyError as e:
+        db.session.rollback()
+        logger.error(f"Error al guardar palabras clave de la noticia: {str(e)}")
+        raise
 
 def save_news(titulo, contenido, url, fecha_publicacion, fuente_id, tema_id=None):
     """Guarda una noticia en la BD usando SQLAlchemy."""

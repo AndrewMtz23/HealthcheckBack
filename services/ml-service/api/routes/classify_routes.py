@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 from core.classify_service import predict_news
 from utils.article_extractor import extract_news_data
-from utils.db_utils import get_or_create_source, save_news, get_active_model, save_classification, save_consultation, classify_topic
+from utils.db_utils import get_or_create_source, save_news, get_active_model, save_classification, save_consultation, classify_topic, extract_keywords, save_news_keywords
 import logging
 
 # Configuración básica de logging
@@ -56,8 +56,12 @@ def classify():
             fuente_id,
             tema_id
         )
+        
+        # PASO 3: Extraer y Guardar Keywords
+        keywords = extract_keywords(text)
+        save_news_keywords(noticia_id, keywords)
 
-        # PASO 3: Clasificar Noticia como verdadera o falsa
+        # PASO 4: Clasificar Noticia como verdadera o falsa
         resultado, confianza, explicacion = predict_news(text)
 
         # Obtener el modelo activo
@@ -68,7 +72,7 @@ def classify():
         # Guardar clasificación
         clasificacion_id = save_classification(noticia_id, modelo_id, resultado, confianza, explicacion)
 
-        # PASO 4: Guardar en historial de consultas
+        # PASO 5: Guardar en historial de consultas
         consulta_id = None
         if usuario_id:
             consulta_id = save_consultation(usuario_id, noticia_id)
@@ -82,7 +86,8 @@ def classify():
             "Clasificación": resultado,
             "Confianza": confianza,
             "Explicación": explicacion,
-            "Tema": tema_nombre
+            "Tema": tema_nombre,
+            "Palabras Clave": keywords
         }), 200
     
     except Exception as e:

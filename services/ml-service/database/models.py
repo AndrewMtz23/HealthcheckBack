@@ -106,3 +106,17 @@ class Tema(db.Model):
     
     # Relaciones
     noticias = db.relationship('Noticia', backref='tema', lazy=True)
+
+class Keyword(db.Model):
+    __tablename__ = 'keywords'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    palabra = db.Column(db.String, unique=True, nullable=False)
+    relevancia = db.Column(db.Numeric(5, 2), default=1.0)
+
+class NoticiaKeyword(db.Model):
+    __tablename__ = 'noticias_keywords'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    noticia_id = db.Column(db.Integer, db.ForeignKey('noticias.id', ondelete='CASCADE'))
+    keyword_id = db.Column(db.Integer, db.ForeignKey('keywords.id', ondelete='CASCADE'))
