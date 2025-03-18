@@ -1,5 +1,6 @@
 from flask import Flask
 from api.routes.classify_routes import classify_bp
+from api.routes.train_routes import train_bp
 from database.db import db, init_db
 from database.models import *  # Importar todos los modelos
 from config import Config
@@ -15,6 +16,7 @@ init_db(app)
 
 # Registrar los Blueprints
 app.register_blueprint(classify_bp, url_prefix="/api/classify")
+app.register_blueprint(train_bp, url_prefix="/api/train")
 
 if __name__ == "__main__":
     # Verificar si es el proceso principal (no el reloader)
@@ -22,5 +24,7 @@ if __name__ == "__main__":
     if not os.environ.get('WERKZEUG_RUN_MAIN'):
         with app.app_context():
             start_scheduler(app)
+            from core.classify_service import load_model
+            load_model()
             
     app.run(host="0.0.0.0", port=5000, debug=True)

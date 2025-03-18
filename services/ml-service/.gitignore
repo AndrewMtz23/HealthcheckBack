@@ -1,5 +1,6 @@
 # Dependencies
 venv/
+models/model_*
 
 # Python
 __pycache__/
