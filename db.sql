@@ -1,17 +1,16 @@
 -- Definir ENUMs
 CREATE TYPE rol_enum AS ENUM ('admin', 'usuario');
 CREATE TYPE frecuencia_enum AS ENUM ('diaria', 'semanal', 'inmediata');
-CREATE TYPE resultado_enum AS ENUM ('verdadera', 'falsa', 'dudosa');
+CREATE TYPE resultado_enum AS ENUM ('verdadera', 'falsa');
 CREATE TYPE estado_enum AS ENUM ('pendiente', 'revisado', 'desestimado');
 CREATE TYPE interaccion_enum AS ENUM ('marcar_confiable', 'marcar_dudosa', 'compartir');
-CREATE TYPE notificacion_tipo_enum AS ENUM ('sms', 'email', 'app');
-CREATE TYPE material_tipo_enum AS ENUM ('articulo', 'video', 'infografia', 'quiz');
+CREATE TYPE tipo_notificacion_enum AS ENUM ('email', 'sms');
 CREATE TYPE log_tipo_enum AS ENUM ('error', 'warning', 'info', 'security');
 
 -- Crear la tabla TEMAS primero, ya que otras tablas dependen de ella
 CREATE TABLE temas (
   id SERIAL PRIMARY KEY,
-  nombre VARCHAR NOT NULL,
+  nombre VARCHAR NOT NULL UNIQUE,
   descripcion TEXT,
   activo BOOLEAN DEFAULT true
 );
@@ -22,6 +21,7 @@ CREATE TABLE usuarios (
   email VARCHAR UNIQUE NOT NULL,
   nombre VARCHAR NOT NULL,
   telefono VARCHAR,
+  contrasena VARCHAR,
   rol rol_enum NOT NULL DEFAULT 'usuario',
   fecha_registro TIMESTAMP DEFAULT now(),
   ultima_conexion TIMESTAMP,
@@ -32,20 +32,29 @@ CREATE TABLE usuarios (
 CREATE TABLE preferencias_usuario (
   id SERIAL PRIMARY KEY,
   usuario_id INT REFERENCES usuarios(id) ON DELETE CASCADE,
-  tema_id INT REFERENCES temas(id) ON DELETE SET NULL,
   recibir_notificaciones BOOLEAN DEFAULT true,
   frecuencia_notificaciones frecuencia_enum DEFAULT 'diaria',
+  tipo_notificacion tipo_notificacion_enum DEFAULT 'email' NOT NULL,
   created_at TIMESTAMP DEFAULT now(),
   updated_at TIMESTAMP
+);
+
+CREATE TABLE preferencias_usuario_temas (
+  id SERIAL PRIMARY KEY,
+  usuario_id INT REFERENCES usuarios(id) ON DELETE CASCADE,
+  tema_id INT REFERENCES temas(id) ON DELETE CASCADE,
+  UNIQUE (usuario_id, tema_id)
 );
 
 CREATE TABLE fuentes (
   id SERIAL PRIMARY KEY,
   nombre VARCHAR NOT NULL,
-  url VARCHAR,
-  confiabilidad DECIMAL(5,2),
+  url VARCHAR UNIQUE,
+  confiabilidad DECIMAL(5,2) DEFAULT 0.5,
   verificada BOOLEAN DEFAULT false,
   descripcion TEXT,
+  verdaderas INT DEFAULT 0,
+  falsas INT DEFAULT 0,
   created_at TIMESTAMP DEFAULT now(),
   updated_at TIMESTAMP
 );
@@ -115,24 +124,13 @@ CREATE TABLE interacciones_noticia (
 CREATE TABLE notificaciones (
   id SERIAL PRIMARY KEY,
   usuario_id INT REFERENCES usuarios(id) ON DELETE CASCADE,
+  noticia_id INT REFERENCES noticias(id) ON DELETE CASCADE,
   titulo VARCHAR NOT NULL,
   mensaje TEXT NOT NULL,
-  tipo notificacion_tipo_enum NOT NULL,
+  tipo tipo_notificacion_enum NOT NULL,
   enviada BOOLEAN DEFAULT false,
-  leida BOOLEAN DEFAULT false,
   fecha_creacion TIMESTAMP DEFAULT now(),
   fecha_envio TIMESTAMP
-);
-
-CREATE TABLE material_educativo (
-  id SERIAL PRIMARY KEY,
-  titulo VARCHAR NOT NULL,
-  contenido TEXT NOT NULL,
-  tema_id INT REFERENCES temas(id) ON DELETE SET NULL,
-  tipo material_tipo_enum NOT NULL,
-  url VARCHAR,
-  created_at TIMESTAMP DEFAULT now(),
-  updated_at TIMESTAMP
 );
 
 CREATE TABLE chatbot_qa (
@@ -174,14 +172,3 @@ CREATE TABLE configuracion_sistema (
   descripcion TEXT,
   updated_at TIMESTAMP
 );
-
-ALTER TABLE fuentes ADD CONSTRAINT unique_fuente_url UNIQUE (url);
-
-ALTER TABLE usuarios ADD COLUMN contrasena VARCHAR;
-
-ALTER TABLE temas ADD CONSTRAINT unique_tema_nombre UNIQUE (nombre);
-
-ALTER TABLE fuentes 
-ALTER COLUMN confiabilidad SET DEFAULT 0.5,
-ADD COLUMN verdaderas INT DEFAULT 0,
-ADD COLUMN falsas INT DEFAULT 0;
