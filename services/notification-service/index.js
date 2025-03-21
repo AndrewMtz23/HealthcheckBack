@@ -134,7 +134,7 @@ app.post('/api/send', async (req, res) => {
     
     // Obtener preferencias del usuario
     const userResult = await pool.query(
-      'SELECT u.email, u.telefono, pu.tipo_notificacion FROM usuarios u LEFT JOIN preferencias_usuario pu ON u.id = pu.usuario_id WHERE u.id = $1',
+      'SELECT u.email, u.telefono, u.nombre, pu.tipo_notificacion FROM usuarios u LEFT JOIN preferencias_usuario pu ON u.id = pu.usuario_id WHERE u.id = $1',
       [usuario_id]
     );
     
@@ -142,7 +142,7 @@ app.post('/api/send', async (req, res) => {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
     
-    const { email, telefono, tipo_notificacion } = userResult.rows[0];
+    const { email, telefono, nombre, tipo_notificacion } = userResult.rows[0];
     
     // Determinar el tipo de notificación
     let tipo = tipo_notificacion || 'email';
@@ -162,11 +162,11 @@ app.post('/api/send', async (req, res) => {
     let success = false;
     
     if (tipo === 'email' && email) {
-      await sendEmail(email, titulo, mensaje);
+      // Para envíos manuales individuales, usamos el formato normal para un solo email
+      await sendIndividualEmail(email, nombre, titulo, mensaje);
       success = true;
     } else if (tipo === 'sms' && telefono) {
-      const smsMessage = formatSMSMessage(titulo, mensaje);
-      await sendSMS(telefono, smsMessage);
+      await sendSMS(telefono, `${titulo}: ${mensaje}`);
       success = true;
     }
     
@@ -221,22 +221,16 @@ app.get('/api/notifications/:userId', async (req, res) => {
   }
 });
 
-// Función para formatear mensaje SMS para que no exceda 160 caracteres
-function formatSMSMessage(titulo, mensaje) {
-  const fullMessage = `${titulo}: ${mensaje}`;
-  // Limitar a 157 caracteres para dejar espacio para puntos suspensivos si es necesario
-  return fullMessage.length <= 157 ? fullMessage : `${fullMessage.substring(0, 157)}...`;
-}
-
-// Función para enviar correo electrónico
-async function sendEmail(to, subject, body) {
+// Función para enviar un email individual
+async function sendIndividualEmail(to, nombre, subject, body) {
   const mailOptions = {
     from: process.env.EMAIL_USER,
     to,
     subject,
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
-        <h2 style="color: #333;">${subject}</h2>
+        <h2 style="color: #333;">Hola${nombre ? ` ${nombre}` : ''}!</h2>
+        <h3 style="color: #444;">${subject}</h3>
         <div style="color: #555; line-height: 1.5;">
           ${body}
         </div>
@@ -249,6 +243,110 @@ async function sendEmail(to, subject, body) {
   
   await emailTransporter.sendMail(mailOptions);
   return true;
+}
+
+// Función para enviar emails agrupados
+async function sendGroupedEmails(userNotifications) {
+  // Agrupar por usuario (email)
+  const emailGroups = {};
+  
+  for (const notification of userNotifications) {
+    const { email, nombre } = notification;
+    if (!email) continue;
+    
+    if (!emailGroups[email]) {
+      emailGroups[email] = {
+        nombre,
+        notifications: []
+      };
+    }
+    
+    emailGroups[email].notifications.push({
+      id: notification.id,
+      titulo: notification.titulo,
+      mensaje: notification.mensaje,
+      tema: notification.tema_nombre,
+      noticia_id: notification.noticia_id,
+      noticia_titulo: notification.noticia_titulo,
+      confianza: notification.confianza
+    });
+  }
+  
+  // Enviar un email para cada usuario con todas sus notificaciones
+  for (const email in emailGroups) {
+    const { nombre, notifications } = emailGroups[email];
+    
+    // Crear contenido HTML para todas las notificaciones
+    let notificationsHtml = '';
+    
+    // Agrupar por tema
+    const temaGroups = {};
+    notifications.forEach(notif => {
+      const tema = notif.tema || 'General';
+      if (!temaGroups[tema]) {
+        temaGroups[tema] = [];
+      }
+      temaGroups[tema].push(notif);
+    });
+    
+    // Generar HTML para cada grupo de tema
+    for (const tema in temaGroups) {
+      notificationsHtml += `
+        <div style="margin-bottom: 25px;">
+          <h3 style="color: #444; border-bottom: 1px solid #ddd; padding-bottom: 10px;">${tema}</h3>
+          <div>
+      `;
+      
+      temaGroups[tema].forEach(notif => {
+        notificationsHtml += `
+          <div style="margin-bottom: 20px; padding: 15px; background-color: #f8f8f8; border-left: 4px solid #e74c3c; border-radius: 4px;">
+            <h4 style="margin-top: 0; color: #e74c3c;">${notif.titulo}</h4>
+            <p style="color: #555;">${notif.mensaje}</p>
+            ${notif.noticia_titulo ? `<p style="font-style: italic; color: #777;">Noticia: "${notif.noticia_titulo}"</p>` : ''}
+            ${notif.confianza ? `<p style="font-weight: bold;">Confianza: ${notif.confianza}%</p>` : ''}
+          </div>
+        `;
+      });
+      
+      notificationsHtml += `
+          </div>
+        </div>
+      `;
+    }
+    
+    // Enviar el email con todas las notificaciones
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: `HealthCheck: Alertas de desinformación (${notifications.length})`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
+          <h2 style="color: #333;">Hola${nombre ? ` ${nombre}` : ''}!</h2>
+          <p style="color: #555;">HealthCheck ha detectado ${notifications.length} posible${notifications.length !== 1 ? 's' : ''} caso${notifications.length !== 1 ? 's' : ''} de desinformación sobre temas que te interesan:</p>
+          
+          ${notificationsHtml}
+          
+          <div style="margin-top: 20px; background-color: #f5f5f5; padding: 15px; border-radius: 4px;">
+            <p style="margin: 0; color: #555;">Estas alertas se generan automáticamente cuando nuestro sistema detecta noticias potencialmente falsas sobre los temas que sigues.</p>
+          </div>
+          
+          <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0; color: #777; font-size: 12px;">
+            Este es un mensaje automático de HealthCheck. Por favor, no responda a este correo.<br>
+            Para administrar tus preferencias de notificación, inicia sesión en tu cuenta de HealthCheck.
+          </div>
+        </div>
+      `
+    };
+    
+    await emailTransporter.sendMail(mailOptions);
+    
+    // Actualizar todas las notificaciones como enviadas
+    const notificationIds = notifications.map(n => n.id);
+    await pool.query(
+      'UPDATE notificaciones SET enviada = TRUE, fecha_envio = NOW() WHERE id = ANY($1)',
+      [notificationIds]
+    );
+  }
 }
 
 // Función para enviar SMS
@@ -267,43 +365,53 @@ async function sendSMS(to, message) {
   return true;
 }
 
-// Función para verificar y enviar notificaciones pendientes
+// Función para procesar notificaciones pendientes
 async function processUnsentNotifications() {
   const client = await pool.connect();
   
   try {
+    // Agrupar las notificaciones por tipo y usuario
+    const emailNotifications = [];
+    const smsNotifications = [];
+    
     // Obtener notificaciones pendientes
     const pendingResult = await client.query(
-      `SELECT n.id, n.usuario_id, n.titulo, n.mensaje, n.tipo, u.email, u.telefono
+      `SELECT n.id, n.usuario_id, n.titulo, n.mensaje, n.tipo, n.noticia_id, 
+              u.email, u.telefono, u.nombre,
+              no.titulo as noticia_titulo, t.nombre as tema_nombre
        FROM notificaciones n
        JOIN usuarios u ON n.usuario_id = u.id
+       LEFT JOIN noticias no ON n.noticia_id = no.id
+       LEFT JOIN temas t ON no.tema_id = t.id
        WHERE n.enviada = FALSE
-       ORDER BY n.fecha_creacion ASC
-       LIMIT 50`
+       ORDER BY u.id, n.tipo, n.fecha_creacion ASC`
     );
     
+    // Separar notificaciones por tipo
     for (const notification of pendingResult.rows) {
-      const { id, tipo, email, telefono, titulo, mensaje } = notification;
-      let success = false;
-      
+      if (notification.tipo === 'email' && notification.email) {
+        emailNotifications.push(notification);
+      } else if (notification.tipo === 'sms' && notification.telefono) {
+        smsNotifications.push(notification);
+      }
+    }
+    
+    // Procesar emails de forma agrupada
+    if (emailNotifications.length > 0) {
+      await sendGroupedEmails(emailNotifications);
+    }
+    
+    // Procesar SMS de forma individual
+    for (const notification of smsNotifications) {
       try {
-        if (tipo === 'email' && email) {
-          await sendEmail(email, titulo, mensaje);
-          success = true;
-        } else if (tipo === 'sms' && telefono) {
-          const smsMessage = formatSMSMessage(titulo, mensaje);
-          await sendSMS(telefono, smsMessage);
-          success = true;
-        }
+        await sendSMS(notification.telefono, `${notification.titulo}: ${notification.mensaje}`);
         
-        if (success) {
-          await client.query(
-            'UPDATE notificaciones SET enviada = TRUE, fecha_envio = NOW() WHERE id = $1',
-            [id]
-          );
-        }
+        await client.query(
+          'UPDATE notificaciones SET enviada = TRUE, fecha_envio = NOW() WHERE id = $1',
+          [notification.id]
+        );
       } catch (error) {
-        // Continuar con la siguiente notificación en caso de error
+        // Continuar con el siguiente SMS en caso de error
       }
     }
   } finally {
@@ -318,13 +426,25 @@ async function generateFalseNewsNotifications() {
   try {
     // Obtener usuarios con notificaciones activas
     const usersResult = await client.query(
-      `SELECT u.id, u.email, u.telefono, pu.tipo_notificacion, pu.frecuencia_notificaciones
+      `SELECT u.id, u.email, u.telefono, u.nombre, pu.tipo_notificacion, pu.frecuencia_notificaciones
        FROM usuarios u
        JOIN preferencias_usuario pu ON u.id = pu.usuario_id
        WHERE u.activo = TRUE AND pu.recibir_notificaciones = TRUE`
     );
     
+    // Estructura para almacenar notificaciones por usuario antes de enviarlas
+    const userNotifications = {};
+    
     for (const user of usersResult.rows) {
+      // Inicializar arrays para este usuario
+      if (!userNotifications[user.id]) {
+        userNotifications[user.id] = {
+          user: user,
+          emailNotifications: [],
+          smsNotifications: []
+        };
+      }
+      
       // Obtener temas de interés del usuario
       const userTopicsResult = await client.query(
         `SELECT t.id FROM preferencias_usuario_temas put
@@ -348,7 +468,7 @@ async function generateFalseNewsNotifications() {
       
       // Buscar noticias falsas recientes
       const noticiasResult = await client.query(
-        `SELECT n.id, n.titulo, t.nombre as tema_nombre, cn.confianza
+        `SELECT n.id, n.titulo, t.nombre as tema_nombre, cn.resultado, cn.confianza
          FROM noticias n
          JOIN clasificacion_noticias cn ON n.id = cn.noticia_id
          JOIN temas t ON n.tema_id = t.id
@@ -360,11 +480,11 @@ async function generateFalseNewsNotifications() {
              WHERE usuario_id = $2 AND noticia_id IS NOT NULL
            )
          ORDER BY cn.confianza DESC, n.created_at DESC
-         LIMIT 3`,
+         LIMIT 5`,
         [topicIds, user.id]
       );
       
-      // Crear y enviar notificaciones
+      // Crear notificaciones para cada noticia falsa
       for (const noticia of noticiasResult.rows) {
         const titulo = `Alerta: ${noticia.tema_nombre}`;
         const mensaje = `HealthCheck ha detectado información falsa: "${noticia.titulo}" (${noticia.confianza}% de probabilidad)`;
@@ -377,7 +497,7 @@ async function generateFalseNewsNotifications() {
           else continue;
         }
         
-        // Crear notificación
+        // Crear notificación en la base de datos
         const notifResult = await client.query(
           `INSERT INTO notificaciones
            (usuario_id, noticia_id, titulo, mensaje, tipo, enviada, fecha_creacion)
@@ -386,28 +506,48 @@ async function generateFalseNewsNotifications() {
           [user.id, noticia.id, titulo, mensaje, tipo]
         );
         
-        // Enviar inmediatamente
-        const notificationId = notifResult.rows[0].id;
-        let success = false;
+        // Almacenar la notificación para envío agrupado
+        const notification = {
+          id: notifResult.rows[0].id,
+          titulo,
+          mensaje,
+          noticia_id: noticia.id,
+          noticia_titulo: noticia.titulo,
+          tema_nombre: noticia.tema_nombre,
+          confianza: noticia.confianza,
+          email: user.email,
+          telefono: user.telefono,
+          nombre: user.nombre
+        };
         
+        if (tipo === 'email') {
+          userNotifications[user.id].emailNotifications.push(notification);
+        } else if (tipo === 'sms') {
+          userNotifications[user.id].smsNotifications.push(notification);
+        }
+      }
+    }
+    
+    // Procesar las notificaciones agrupadas por usuario
+    for (const userId in userNotifications) {
+      const userData = userNotifications[userId];
+      
+      // Enviar emails agrupados si hay notificaciones
+      if (userData.emailNotifications.length > 0) {
+        await sendGroupedEmails(userData.emailNotifications);
+      }
+      
+      // Enviar SMS individuales
+      for (const notification of userData.smsNotifications) {
         try {
-          if (tipo === 'email' && user.email) {
-            await sendEmail(user.email, titulo, mensaje);
-            success = true;
-          } else if (tipo === 'sms' && user.telefono) {
-            const smsMessage = formatSMSMessage(titulo, mensaje);
-            await sendSMS(user.telefono, smsMessage);
-            success = true;
-          }
+          await sendSMS(notification.telefono, `${notification.titulo}: ${notification.mensaje}`);
           
-          if (success) {
-            await client.query(
-              'UPDATE notificaciones SET enviada = TRUE, fecha_envio = NOW() WHERE id = $1',
-              [notificationId]
-            );
-          }
+          await client.query(
+            'UPDATE notificaciones SET enviada = TRUE, fecha_envio = NOW() WHERE id = $1',
+            [notification.id]
+          );
         } catch (error) {
-          // Continuar con la siguiente notificación en caso de error
+          // Continuar con el siguiente SMS en caso de error
         }
       }
     }
