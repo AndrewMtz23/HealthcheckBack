@@ -1,18 +1,19 @@
 {
-  "name": "notification-service",
+  "name": "healthcheck-notification-service",
   "version": "1.0.0",
-  "description": "Servicio de notificaciones para HealthCheck",
-  "main": "index.js",
+  "description": "Servicio de notificaciones para la plataforma HealthCheck",
+  "main": "src/app.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js",
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
+    "health",
     "notifications",
-    "healthcheck",
     "email",
-    "sms"
+    "sms",
+    "fake-news"
   ],
   "author": "SmartLink",
   "license": "ISC",
