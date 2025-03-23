@@ -25,7 +25,8 @@ CREATE TABLE usuarios (
   rol rol_enum NOT NULL DEFAULT 'usuario',
   fecha_registro TIMESTAMP DEFAULT now(),
   ultima_conexion TIMESTAMP,
-  activo BOOLEAN DEFAULT true
+  activo BOOLEAN DEFAULT true,
+  google_id VARCHAR UNIQUE
 );
 
 -- Crear otras tablas en el orden correcto
