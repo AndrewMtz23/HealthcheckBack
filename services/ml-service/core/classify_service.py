@@ -85,7 +85,10 @@ def predict_news(text):
     probs = F.softmax(outputs.logits, dim=-1)
     confidence, predicted_class = torch.max(probs, dim=1)
 
+    verdad_prob = probs[0, 0].item()
+    confiabilidad = round(verdad_prob * 100, 2)
+
     labels = ["verdadera", "falsa"]
-    return labels[predicted_class.item()], round(confidence.item() * 100, 2), \
+    return labels[predicted_class.item()], confiabilidad, \
            "La noticia parece confiable." if labels[predicted_class.item()] == "verdadera" else \
            "La noticia muestra patrones de desinformación."
