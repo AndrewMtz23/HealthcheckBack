@@ -52,6 +52,7 @@ class ModeloML(db.Model):
     activo = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime)
+    modelo_base = db.Column(db.Integer, db.ForeignKey('modelos_ml.id', ondelete='CASCADE')) 
 
     # Relaciones
     clasificaciones = db.relationship('ClasificacionNoticia', backref='modelo', lazy=True)

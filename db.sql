@@ -84,7 +84,8 @@ CREATE TABLE modelos_ml (
   fecha_entrenamiento TIMESTAMP,
   activo BOOLEAN DEFAULT false,
   created_at TIMESTAMP DEFAULT now(),
-  updated_at TIMESTAMP
+  updated_at TIMESTAMP,
+  modelo_base INT REFERENCES modelos_ml(id) ON DELETE CASCADE
 );
 
 CREATE TABLE clasificacion_noticias (
