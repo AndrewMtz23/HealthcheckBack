@@ -13,6 +13,7 @@ from utils.db_utils import (
 )
 from core.classify_service import predict_news
 from database.db import db
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -151,3 +152,100 @@ class GoogleNewsScraper:
         self.close_driver()
         
         return processed_news_ids
+    
+    def get_news_without_saving(self, rss_url=None, limit=5):
+        """
+        Scrape noticias de Google News, las clasifica pero NO las guarda en la base de datos.
+        En su lugar, devuelve los resultados como una lista de diccionarios.
+        
+        Args:
+            rss_url (str): URL del feed RSS de Google News
+            limit (int): Número máximo de noticias a procesar
+            
+        Returns:
+            list: Lista de diccionarios con los datos de las noticias
+        """
+        if rss_url is None:
+            # URL predeterminada - noticias de salud en español
+            rss_url = "https://news.google.com/rss/topics/CAAqJggKIiBDQkFTRWdvSUwyMHZNR3QwTlRFU0JtVnpMVFF4T1NnQVAB?hl=es-419&gl=MX&ceid=MX%3Aes-419"
+        
+        # Inicializar driver
+        self._init_driver()
+        
+        # Obtener el feed
+        feed = feedparser.parse(rss_url)
+        
+        # Lista para almacenar los resultados
+        results = []
+        
+        # Procesar las noticias
+        for entry in feed.entries[:limit]:
+            try:
+                titulo = entry.title
+                link_google = entry.link
+                
+                # Seguir la redirección para obtener la URL real
+                real_url = self.get_actual_url(link_google)
+                
+                if not real_url:
+                    continue
+                
+                # Extraer el contenido de la noticia
+                try:
+                    articulo = Article(real_url, language="es")
+                    articulo.download()
+                    articulo.parse()
+                    
+                    # Extraer contenido completo y fecha
+                    contenido = articulo.text
+                    fecha_publicacion = articulo.publish_date
+                    
+                    # Si la noticia no tiene contenido, saltarla
+                    if not contenido or len(contenido) < 100:
+                        logger.warning(f"Contenido demasiado corto para: {real_url}")
+                        continue
+                    
+                    # Obtener nombre de la fuente a partir de la URL
+                    parsed_url = urlparse(real_url)
+                    fuente = parsed_url.netloc.replace('www.', '')
+                    
+                    # Clasificar el tema
+                    tema_nombre, _ = classify_topic(contenido)
+                    
+                    # Extraer keywords
+                    keywords = extract_keywords(contenido, num_keywords=5)
+                    
+                    # Clasificar la noticia (verdadera/falsa)
+                    resultado, confianza, explicacion = predict_news(contenido)
+                    
+                    # Crear objeto de resultado
+                    news_item = {
+                        "titulo": titulo,
+                        "url": real_url,
+                        "fecha_publicacion": fecha_publicacion.isoformat() if fecha_publicacion else None,
+                        "fuente": fuente,
+                        "contenido": contenido,
+                        "tema": tema_nombre,
+                        "clasificacion": resultado,
+                        "confianza": confianza,
+                        "explicacion": explicacion,
+                        "palabras_clave": keywords
+                    }
+                    
+                    # Añadir a la lista de resultados
+                    results.append(news_item)
+                    
+                    logger.info(f"Noticia analizada (sin guardar): {titulo} | Clasificación: {resultado} ({confianza}%)")
+                    
+                except Exception as e:
+                    logger.error(f"Error al procesar artículo de {real_url}: {str(e)}")
+                    continue
+                    
+            except Exception as e:
+                logger.error(f"Error al procesar entrada de feed: {str(e)}")
+                continue
+                
+        # Cerrar el driver
+        self.close_driver()
+        
+        return results
