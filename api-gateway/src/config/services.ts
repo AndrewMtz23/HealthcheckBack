@@ -35,12 +35,21 @@ const services: ServiceDefinition[] = [
     routes: [
       // Ruta para clasificar noticias - requiere autenticación
       {
-        path: '/classify',
+        path: '/classify/predict',
         auth: true,
         // Implementar rate limiting más estricto para este endpoint
         rateLimit: {
           windowMs: 60 * 1000, // 1 minuto
           max: 10, // 10 peticiones por minuto
+        },
+      },
+      // Ruta para el chatbot - requiere autenticación
+      {
+        path: '/chatbot/chat',
+        auth: true,
+        rateLimit: {
+          windowMs: 60 * 1000, // 1 minuto
+          max: 15, // 15 mensajes por minuto
         },
       },
       // Ruta para obtener estadísticas - requiere autenticación

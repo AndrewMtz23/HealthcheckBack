@@ -72,7 +72,7 @@ conversational_agent_executor = RunnableWithMessageHistory(
     output_messages_key="output",
 )
 
-@chatbot_bp.route("/", methods=["POST"])
+@chatbot_bp.route("/chat", methods=["POST"])
 def chat_endpoint():
     """Endpoint para interactuar con el chatbot"""
     try:

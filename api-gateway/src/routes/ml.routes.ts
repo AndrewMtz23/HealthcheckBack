@@ -12,25 +12,23 @@ if (!mlService) {
   throw new Error('Servicio de ML no configurado');
 }
 
-// Todas las rutas del servicio de ML requieren autenticación
+// Crear rate limiters en la inicialización, no durante las solicitudes
+const mlRateLimiter = createRateLimiter({
+  windowMs: 60 * 1000, // 1 minuto
+  max: 10 // 10 peticiones por minuto para usuarios autenticados
+});
+
+// Todas las rutas del servicio de ML
 mlService.routes.forEach(route => {
-  // Corregido: la ruta debe ser solo el path final, no incluir /api/ml
+  // Todas las rutas ahora requieren autenticación
   router.all(
     route.path,
+    verifyToken, // Middleware de autenticación para todas las rutas
+    mlRateLimiter,
     (req, res, next) => {
-      console.log(`Accediendo a ruta de ML: ${route.path}`);
-      
-      // Aplicar rate limiting específico si está configurado
-      if (route.rateLimit) {
-        const limiter = createRateLimiter({
-          windowMs: route.rateLimit.windowMs,
-          max: route.rateLimit.max
-        });
-        return limiter(req, res, next);
-      }
+      console.log(`Accediendo a ruta protegida de ML: ${route.path}`);
       next();
     },
-    verifyToken,
     proxy.createServiceProxy('ml', config.services.ml)
   );
 });
