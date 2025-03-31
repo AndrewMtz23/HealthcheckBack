@@ -33,45 +33,28 @@ const services: ServiceDefinition[] = [
     name: 'ml',
     url: config.services.ml,
     routes: [
-      // Ruta para clasificar noticias - requiere autenticación
-      {
-        path: '/classify/predict',
-        auth: true,
-        // Implementar rate limiting más estricto para este endpoint
-        rateLimit: {
-          windowMs: 60 * 1000, // 1 minuto
-          max: 10, // 10 peticiones por minuto
-        },
-      },
-      // Ruta para el chatbot - requiere autenticación
-      {
-        path: '/chatbot/chat',
-        auth: true,
-        rateLimit: {
-          windowMs: 60 * 1000, // 1 minuto
-          max: 15, // 15 mensajes por minuto
-        },
-      },
-      // Ruta para obtener estadísticas - requiere autenticación
-      { path: '/classify/stats', auth: true },
+      { path: '/classify/predict', auth: true },
+      { path: '/classify/scrape/google', auth: true },
+      { path: '/classify/scrape/twitter', auth: true },
+      { path: '/train/train', auth: true },
+      { path: '/train/models', auth: true },
+      { path: '/train/models/:model_id/activate', auth: true },
+      { path: '/train/models/:model_id', auth: true },
+      { path: '/chatbot/chat', auth: true },
     ],
   },
   {
     name: 'notifications',
     url: config.services.notifications,
     routes: [
-      // Rutas para gestionar preferencias de notificaciones - requieren autenticación
-      { path: '/preferences', auth: true },
-      { path: '/history', auth: true },
-      // Ruta para enviar notificaciones manuales - requiere autenticación
-      { 
-        path: '/send', 
-        auth: true,
-        rateLimit: {
-          windowMs: 60 * 1000, // 1 minuto
-          max: 5, // 5 peticiones por minuto
-        }
-      },
+      // Rutas de preferencias - todas requieren autenticación
+      { path: '/preferences/:userId', auth: true },
+      { path: '/preferences/:userId/topics', auth: true },
+      { path: '/preferences/:userId/topics/:topicId', auth: true },
+      { path: '/preferences/topics/all', auth: true },
+      
+      // Rutas de notificaciones - todas requieren autenticación
+      { path: '/notifications/:userId', auth: true },
     ],
   },
 ];

@@ -4,7 +4,7 @@ const notificationRoutes = require('./notification.routes');
 const preferenceRoutes = require('./preference.routes');
 
 // Configurar rutas
-router.use('/notifications', notificationRoutes);
-router.use('/preferences', preferenceRoutes);
+router.use('/notifications/notifications', notificationRoutes);
+router.use('/notifications/preferences', preferenceRoutes);
 
 module.exports = router;

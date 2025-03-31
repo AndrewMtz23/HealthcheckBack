@@ -29,7 +29,7 @@ const config: Config = {
   services: {
     auth: process.env.AUTH_SERVICE_URL || 'http://localhost:3001/api',
     ml: process.env.ML_SERVICE_URL || 'http://localhost:5000/api',
-    notifications: process.env.NOTIFICATIONS_SERVICE_URL || 'http://localhost:3002/api',
+    notifications: process.env.NOTIFICATIONS_SERVICE_URL || 'http://localhost:3004/api',
   },
   rateLimit: {
     // 15 minutos

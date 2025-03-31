@@ -1,20 +1,10 @@
-import { DataTypes, Model, Optional } from 'sequelize';
+// src/models/ClasificacionNoticia.ts
+import { Model, DataTypes } from 'sequelize';
 import sequelize from '../config/db';
 import News from './News';
+import ModeloML from './ModeloML';
 
-interface ClasificacionNoticiaAttributes {
-  id: number;
-  noticia_id: number;
-  modelo_id: number | null;
-  resultado: 'verdadera' | 'falsa' | 'dudosa';
-  confianza: number | null;
-  explicacion: string | null;
-  fecha_clasificacion: Date;
-}
-
-interface ClasificacionNoticiaCreationAttributes extends Optional<ClasificacionNoticiaAttributes, 'id' | 'fecha_clasificacion' | 'confianza' | 'explicacion'> {}
-
-class ClasificacionNoticia extends Model<ClasificacionNoticiaAttributes, ClasificacionNoticiaCreationAttributes> implements ClasificacionNoticiaAttributes {
+class ClasificacionNoticia extends Model {
   public id!: number;
   public noticia_id!: number;
   public modelo_id!: number | null;
@@ -22,6 +12,9 @@ class ClasificacionNoticia extends Model<ClasificacionNoticiaAttributes, Clasifi
   public confianza!: number | null;
   public explicacion!: string | null;
   public fecha_clasificacion!: Date;
+  
+  // Relación
+  public readonly modelo?: ModeloML;
 }
 
 ClasificacionNoticia.init(
@@ -36,18 +29,18 @@ ClasificacionNoticia.init(
       allowNull: false,
       references: {
         model: 'noticias',
-        key: 'id'
+        key: 'id',
       },
-      onDelete: 'CASCADE'
+      onDelete: 'CASCADE',
     },
     modelo_id: {
       type: DataTypes.INTEGER,
       allowNull: true,
       references: {
         model: 'modelos_ml',
-        key: 'id'
+        key: 'id',
       },
-      onDelete: 'SET NULL'
+      onDelete: 'SET NULL',
     },
     resultado: {
       type: DataTypes.ENUM('verdadera', 'falsa', 'dudosa'),
@@ -74,8 +67,10 @@ ClasificacionNoticia.init(
   }
 );
 
-// Definir la relación
-News.hasMany(ClasificacionNoticia, { foreignKey: 'noticia_id', as: 'clasificaciones' });
-ClasificacionNoticia.belongsTo(News, { foreignKey: 'noticia_id' });
+// Definir relación con ModeloML
+ClasificacionNoticia.belongsTo(ModeloML, {
+  foreignKey: 'modelo_id',
+  as: 'modelo'
+});
 
 export default ClasificacionNoticia;

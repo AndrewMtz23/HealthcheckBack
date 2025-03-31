@@ -1,6 +1,10 @@
 import { Request, Response } from 'express';
 import { QueryTypes } from 'sequelize';
 import News from '../models/News';
+import ClasificacionNoticia from '../models/ClasificacionNoticia';
+import Tema from '../models/Tema';
+import Fuente from '../models/Fuente';
+import ModeloML from '../models/ModeloML';
 import sequelize from '../config/db';
 
 // Obtener noticias recientes con paginación
@@ -15,7 +19,28 @@ export const getRecentNews = async (req: Request, res: Response): Promise<void> 
       offset,
       order: [['fecha_publicacion', 'DESC']],
       include: [
-        // Aquí se pueden incluir relaciones como clasificación, tema, etc.
+        {
+          model: ClasificacionNoticia,
+          as: 'clasificaciones',
+          attributes: ['resultado', 'confianza', 'explicacion', 'fecha_clasificacion'],
+          include: [
+            {
+              model: ModeloML,
+              as: 'modelo',
+              attributes: ['nombre', 'version', 'precision', 'recall', 'f1_score']
+            }
+          ]
+        },
+        {
+          model: Tema,
+          as: 'tema',
+          attributes: ['nombre']
+        },
+        {
+          model: Fuente,
+          as: 'fuente',
+          attributes: ['nombre', 'url', 'confiabilidad']
+        }
       ],
     });
 
@@ -44,7 +69,21 @@ export const getNewsById = async (req: Request, res: Response): Promise<void> =>
 
     const news = await News.findByPk(id, {
       include: [
-        // Incluir relaciones
+        {
+          model: ClasificacionNoticia,
+          as: 'clasificaciones',
+          attributes: ['resultado', 'confianza', 'explicacion']
+        },
+        {
+          model: Tema,
+          as: 'tema',
+          attributes: ['nombre']
+        },
+        {
+          model: Fuente,
+          as: 'fuente',
+          attributes: ['nombre', 'url', 'confiabilidad']
+        }
       ],
     });
 
@@ -84,6 +123,23 @@ export const getNewsByTopic = async (req: Request, res: Response): Promise<void>
       limit,
       offset,
       order: [['fecha_publicacion', 'DESC']],
+      include: [
+        {
+          model: ClasificacionNoticia,
+          as: 'clasificaciones',
+          attributes: ['resultado', 'confianza', 'explicacion']
+        },
+        {
+          model: Tema,
+          as: 'tema',
+          attributes: ['nombre']
+        },
+        {
+          model: Fuente,
+          as: 'fuente',
+          attributes: ['nombre', 'url', 'confiabilidad']
+        }
+      ],
     });
 
     res.status(200).json({

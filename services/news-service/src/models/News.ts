@@ -1,32 +1,28 @@
-import { DataTypes, Model, Optional } from 'sequelize';
+// src/models/News.ts
+import { Model, DataTypes } from 'sequelize';
 import sequelize from '../config/db';
+import Tema from './Tema';
+import Fuente from './Fuente';
+import ClasificacionNoticia from './ClasificacionNoticia';
 
-interface NewsAttributes {
-  id: number;
-  titulo: string;
-  contenido: string;
-  url?: string;
-  fecha_publicacion?: Date;
-  fuente_id?: number;
-  tema_id?: number;
-  fecha_analisis?: Date;
-  created_at: Date;
-  updated_at?: Date;
-}
-
-interface NewsCreationAttributes extends Optional<NewsAttributes, 'id' | 'created_at'> {}
-
-class News extends Model<NewsAttributes, NewsCreationAttributes> implements NewsAttributes {
+class News extends Model {
   public id!: number;
   public titulo!: string;
   public contenido!: string;
-  public url?: string;
-  public fecha_publicacion?: Date;
-  public fuente_id?: number;
-  public tema_id?: number;
-  public fecha_analisis?: Date;
-  public created_at!: Date;
-  public updated_at?: Date;
+  public url!: string | null;
+  public fecha_publicacion!: Date | null;
+  public fuente_id!: number | null;
+  public tema_id!: number | null;
+  public fecha_analisis!: Date | null;
+  
+  // Timestamps
+  public readonly created_at!: Date;
+  public readonly updated_at!: Date;
+  
+  // Relaciones
+  public readonly clasificaciones?: ClasificacionNoticia[];
+  public readonly tema?: Tema;
+  public readonly fuente?: Fuente;
 }
 
 News.init(
@@ -55,10 +51,20 @@ News.init(
     fuente_id: {
       type: DataTypes.INTEGER,
       allowNull: true,
+      references: {
+        model: 'fuentes',
+        key: 'id',
+      },
+      onDelete: 'SET NULL',
     },
     tema_id: {
       type: DataTypes.INTEGER,
       allowNull: true,
+      references: {
+        model: 'temas',
+        key: 'id',
+      },
+      onDelete: 'SET NULL',
     },
     fecha_analisis: {
       type: DataTypes.DATE,
@@ -67,18 +73,37 @@ News.init(
     created_at: {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,
+      field: 'created_at',
     },
     updated_at: {
       type: DataTypes.DATE,
-      allowNull: true,
+      field: 'updated_at',
     },
   },
   {
     sequelize,
     modelName: 'News',
     tableName: 'noticias',
-    timestamps: false,
+    timestamps: true,
+    createdAt: 'created_at',
+    updatedAt: 'updated_at',
   }
 );
+
+// Definir relaciones
+News.hasMany(ClasificacionNoticia, {
+  foreignKey: 'noticia_id',
+  as: 'clasificaciones',
+});
+
+News.belongsTo(Tema, {
+  foreignKey: 'tema_id',
+  as: 'tema',
+});
+
+News.belongsTo(Fuente, {
+  foreignKey: 'fuente_id',
+  as: 'fuente',
+});
 
 export default News;

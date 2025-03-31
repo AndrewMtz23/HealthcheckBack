@@ -1,7 +1,10 @@
 import { Request, Response } from 'express';
-import { Op } from 'sequelize';
+import { Op, Model, ModelCtor } from 'sequelize';
 import News from '../models/News';
 import ClasificacionNoticia from '../models/ClasificacionNoticia';
+import Tema from '../models/Tema';
+import Fuente from '../models/Fuente';
+import ModeloML from '../models/ModeloML';
 
 // Buscar noticias por texto
 export const searchNews = async (req: Request, res: Response): Promise<void> => {
@@ -31,6 +34,30 @@ export const searchNews = async (req: Request, res: Response): Promise<void> => 
       limit,
       offset,
       order: [['fecha_publicacion', 'DESC']],
+      include: [
+        {
+          model: ClasificacionNoticia,
+          as: 'clasificaciones',
+          attributes: ['resultado', 'confianza', 'explicacion'],
+          include: [
+            {
+              model: ModeloML,
+              as: 'modelo',
+              attributes: ['nombre', 'version', 'precision', 'recall', 'f1_score']
+            }
+          ]
+        },
+        {
+          model: Tema,
+          as: 'tema',
+          attributes: ['nombre']
+        },
+        {
+          model: Fuente,
+          as: 'fuente',
+          attributes: ['nombre', 'url', 'confiabilidad']
+        }
+      ],
     });
 
     res.status(200).json({
@@ -96,13 +123,49 @@ export const advancedSearch = async (req: Request, res: Response): Promise<void>
       }
     }
 
+    // Configurar opciones de inclusión con tipo any[]
+    const includeOptions: any[] = [
+      {
+        model: Tema,
+        as: 'tema',
+        attributes: ['nombre']
+      },
+      {
+        model: Fuente,
+        as: 'fuente',
+        attributes: ['nombre', 'url', 'confiabilidad']
+      }
+    ];
+
     // Incluir clasificación si se especifica
-    const includeOptions = [];
     if (clasificacion) {
       includeOptions.push({
         model: ClasificacionNoticia,
         as: 'clasificaciones',
         where: { resultado: clasificacion },
+        attributes: ['resultado', 'confianza', 'explicacion'],
+        include: [
+          {
+            model: ModeloML,
+            as: 'modelo',
+            attributes: ['nombre', 'version', 'precision', 'recall', 'f1_score']
+          }
+        ]
+      });
+    } else {
+      // Si no se especifica clasificación, igual incluimos las clasificaciones pero sin filtrar
+      includeOptions.push({
+        model: ClasificacionNoticia,
+        as: 'clasificaciones',
+        attributes: ['resultado', 'confianza', 'explicacion'],
+        required: false,
+        include: [
+          {
+            model: ModeloML,
+            as: 'modelo',
+            attributes: ['nombre', 'version', 'precision', 'recall', 'f1_score']
+          }
+        ]
       });
     }
 

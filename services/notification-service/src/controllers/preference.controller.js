@@ -1,4 +1,5 @@
 const preferenceService = require('../services/preference.service');
+const logger = require('../utils/logger');
 
 /**
  * Controlador para gestionar preferencias de notificación
@@ -15,8 +16,29 @@ class PreferenceController {
       
       const preferences = await preferenceService.getUserPreferences(userId);
       
+      // Si no hay preferencias configuradas, crear unas por defecto
+      if (!preferences.preferences) {
+        // Configurar preferencias por defecto
+        const defaultPreferences = {
+          recibir_notificaciones: false,
+          frecuencia_notificaciones: 'diaria',
+          tipo_notificacion: 'email'
+        };
+        
+        // Guardar las preferencias por defecto en la base de datos
+        await preferenceService.updatePreferences(userId, defaultPreferences);
+        
+        // Obtener las preferencias recién creadas
+        const newPreferences = await preferenceService.getUserPreferences(userId);
+        
+        // Responder con las nuevas preferencias
+        return res.json(newPreferences);
+      }
+      
+      // Responder con las preferencias existentes
       res.json(preferences);
     } catch (error) {
+      logger.error(`Error al obtener preferencias para usuario ${req.params.userId}:`, error);
       res.status(500).json({ error: error.message || 'Error al obtener preferencias' });
     }
   }
@@ -37,8 +59,12 @@ class PreferenceController {
         tipo_notificacion
       });
       
-      res.json(result);
+      // Obtener las preferencias actualizadas para devolver al cliente
+      const updatedPreferences = await preferenceService.getUserPreferences(userId);
+      
+      res.json(updatedPreferences);
     } catch (error) {
+      logger.error(`Error al actualizar preferencias para usuario ${req.params.userId}:`, error);
       res.status(400).json({ error: error.message || 'Error al actualizar preferencias' });
     }
   }
@@ -53,10 +79,14 @@ class PreferenceController {
       const { userId } = req.params;
       const { tema_id } = req.body;
       
-      const result = await preferenceService.addTopic(userId, tema_id);
+      await preferenceService.addTopic(userId, tema_id);
       
-      res.json(result);
+      // Obtener las preferencias actualizadas para devolver al cliente
+      const updatedPreferences = await preferenceService.getUserPreferences(userId);
+      
+      res.json(updatedPreferences);
     } catch (error) {
+      logger.error(`Error al agregar tema de interés para usuario ${req.params.userId}:`, error);
       res.status(400).json({ error: error.message || 'Error al agregar tema de interés' });
     }
   }
@@ -70,10 +100,14 @@ class PreferenceController {
     try {
       const { userId, topicId } = req.params;
       
-      const result = await preferenceService.removeTopic(userId, topicId);
+      await preferenceService.removeTopic(userId, topicId);
       
-      res.json(result);
+      // Obtener las preferencias actualizadas para devolver al cliente
+      const updatedPreferences = await preferenceService.getUserPreferences(userId);
+      
+      res.json(updatedPreferences);
     } catch (error) {
+      logger.error(`Error al eliminar tema de interés para usuario ${req.params.userId}:`, error);
       res.status(400).json({ error: error.message || 'Error al eliminar tema de interés' });
     }
   }
@@ -89,6 +123,7 @@ class PreferenceController {
       
       res.json({ topics });
     } catch (error) {
+      logger.error('Error al obtener todos los temas:', error);
       res.status(500).json({ error: error.message || 'Error al obtener temas' });
     }
   }

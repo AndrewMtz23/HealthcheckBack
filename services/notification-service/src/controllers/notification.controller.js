@@ -102,6 +102,37 @@ class NotificationController {
       res.status(500).json({ error: 'Error al obtener notificaciones' });
     }
   }
+
+  /**
+   * Elimina una notificación específica
+   * @param {Object} req - Objeto de solicitud Express
+   * @param {Object} res - Objeto de respuesta Express
+   */
+  async deleteNotification(req, res) {
+    try {
+      const { notificationId } = req.params;
+      
+      // Verificar que se proporcionó un ID válido
+      if (!notificationId || isNaN(parseInt(notificationId))) {
+        return res.status(400).json({ error: 'Se requiere un ID de notificación válido' });
+      }
+      
+      // Eliminar la notificación
+      const success = await notificationModel.delete(parseInt(notificationId));
+      
+      if (!success) {
+        return res.status(404).json({ error: 'Notificación no encontrada' });
+      }
+      
+      res.json({ 
+        success: true,
+        message: 'Notificación eliminada correctamente' 
+      });
+    } catch (error) {
+      logger.error('Error al eliminar notificación:', error);
+      res.status(500).json({ error: 'Error al eliminar la notificación' });
+    }
+  }
   
   /**
    * Ejecuta manualmente la verificación de notificaciones (para pruebas)

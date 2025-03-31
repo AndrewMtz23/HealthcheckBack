@@ -128,6 +128,25 @@ class NotificationModel {
       throw error;
     }
   }
+
+  /**
+   * Elimina una notificación específica
+   * @param {number} notificationId - ID de la notificación a eliminar
+   * @returns {Promise<boolean>} - True si se eliminó correctamente
+   */
+  async delete(notificationId) {
+    try {
+      const result = await pool.query(
+        'DELETE FROM notificaciones WHERE id = $1 RETURNING id',
+        [notificationId]
+      );
+      
+      return result.rows.length > 0;
+    } catch (error) {
+      logger.error(`Error al eliminar notificación ${notificationId}:`, error);
+      throw error;
+    }
+  }
   
   /**
    * Verifica si una noticia ya generó notificación para un usuario

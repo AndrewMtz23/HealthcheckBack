@@ -6,8 +6,11 @@ from database.db import db, init_db
 from database.models import *  # Importar todos los modelos
 from config import Config
 from cron_jobs import start_scheduler
+from flask_cors import CORS
+
 
 app = Flask(__name__)
+CORS(app)
 
 # Cargar configuración desde `Config`
 app.config.from_object(Config)

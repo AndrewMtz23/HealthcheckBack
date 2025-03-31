@@ -12,6 +12,7 @@ CREATE TABLE temas (
   id SERIAL PRIMARY KEY,
   nombre VARCHAR NOT NULL UNIQUE,
   descripcion TEXT,
+  palabras_clave TEXT,
   activo BOOLEAN DEFAULT true
 );
 
@@ -54,8 +55,8 @@ CREATE TABLE fuentes (
   confiabilidad DECIMAL(5,2) DEFAULT 0.5,
   verificada BOOLEAN DEFAULT false,
   descripcion TEXT,
-  verdaderas INT DEFAULT 0,
-  falsas INT DEFAULT 0,
+  noticias_verdaderas INT DEFAULT 0,
+  noticias_falsas INT DEFAULT 0,
   created_at TIMESTAMP DEFAULT now(),
   updated_at TIMESTAMP
 );
@@ -68,7 +69,6 @@ CREATE TABLE noticias (
   fecha_publicacion TIMESTAMP,
   fuente_id INT REFERENCES fuentes(id) ON DELETE SET NULL,
   tema_id INT REFERENCES temas(id) ON DELETE SET NULL,
-  fecha_analisis TIMESTAMP,
   created_at TIMESTAMP DEFAULT now(),
   updated_at TIMESTAMP
 );
@@ -135,26 +135,6 @@ CREATE TABLE notificaciones (
   fecha_envio TIMESTAMP
 );
 
-CREATE TABLE chatbot_qa (
-  id SERIAL PRIMARY KEY,
-  pregunta TEXT NOT NULL,
-  respuesta TEXT NOT NULL,
-  tema_id INT REFERENCES temas(id) ON DELETE SET NULL,
-  frecuencia INT DEFAULT 0,
-  created_at TIMESTAMP DEFAULT now(),
-  updated_at TIMESTAMP
-);
-
-CREATE TABLE logs_sistema (
-  id SERIAL PRIMARY KEY,
-  tipo log_tipo_enum NOT NULL,
-  mensaje TEXT NOT NULL,
-  usuario_id INT REFERENCES usuarios(id) ON DELETE SET NULL,
-  ip VARCHAR,
-  user_agent TEXT,
-  fecha TIMESTAMP DEFAULT now()
-);
-
 CREATE TABLE keywords (
   id SERIAL PRIMARY KEY,
   palabra VARCHAR UNIQUE NOT NULL,
@@ -165,12 +145,4 @@ CREATE TABLE noticias_keywords (
   id SERIAL PRIMARY KEY,
   noticia_id INT REFERENCES noticias(id) ON DELETE CASCADE,
   keyword_id INT REFERENCES keywords(id) ON DELETE CASCADE
-);
-
-CREATE TABLE configuracion_sistema (
-  id SERIAL PRIMARY KEY,
-  clave VARCHAR UNIQUE NOT NULL,
-  valor TEXT NOT NULL,
-  descripcion TEXT,
-  updated_at TIMESTAMP
 );

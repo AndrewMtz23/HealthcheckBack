@@ -1,3 +1,4 @@
+// Actualización de ml.routes.ts
 import { Router } from 'express';
 import { verifyToken } from '../middleware/auth';
 import { createRateLimiter } from '../middleware/rateLimit';
@@ -12,25 +13,142 @@ if (!mlService) {
   throw new Error('Servicio de ML no configurado');
 }
 
-// Crear rate limiters en la inicialización, no durante las solicitudes
-const mlRateLimiter = createRateLimiter({
+// Rate limiters para diferentes endpoints
+const defaultRateLimiter = createRateLimiter({
   windowMs: 60 * 1000, // 1 minuto
-  max: 10 // 10 peticiones por minuto para usuarios autenticados
+  max: 10 // 10 peticiones por minuto
 });
 
-// Todas las rutas del servicio de ML
-mlService.routes.forEach(route => {
-  // Todas las rutas ahora requieren autenticación
-  router.all(
-    route.path,
-    verifyToken, // Middleware de autenticación para todas las rutas
-    mlRateLimiter,
-    (req, res, next) => {
-      console.log(`Accediendo a ruta protegida de ML: ${route.path}`);
-      next();
-    },
-    proxy.createServiceProxy('ml', config.services.ml)
-  );
+const trainRateLimiter = createRateLimiter({
+  windowMs: 5 * 60 * 1000, // 5 minutos
+  max: 2 // 2 peticiones cada 5 minutos (operación intensiva)
 });
+
+const scrapeRateLimiter = createRateLimiter({
+  windowMs: 2 * 60 * 1000, // 2 minutos
+  max: 5 // 5 peticiones cada 2 minutos
+});
+
+// Rutas de classify
+router.post(
+  '/classify/predict',
+  verifyToken,
+  defaultRateLimiter,
+  proxy.createServiceProxy('ml', config.services.ml)
+);
+
+// Rutas de scraping - requieren autenticación de administrador
+router.post(
+  '/classify/scrape/google',
+  verifyToken,
+  scrapeRateLimiter,
+  (req, res, next) => {
+    // Verificar si el usuario es admin
+    if (req.user && req.user.rol === 'admin') {
+      next();
+    } else {
+      res.status(403).json({
+        status: 'error',
+        message: 'Acceso denegado. Se requieren permisos de administrador.'
+      });
+    }
+  },
+  proxy.createServiceProxy('ml', config.services.ml)
+);
+
+router.post(
+  '/classify/scrape/twitter',
+  verifyToken,
+  scrapeRateLimiter,
+  (req, res, next) => {
+    // Verificar si el usuario es admin
+    if (req.user && req.user.rol === 'admin') {
+      next();
+    } else {
+      res.status(403).json({
+        status: 'error',
+        message: 'Acceso denegado. Se requieren permisos de administrador.'
+      });
+    }
+  },
+  proxy.createServiceProxy('ml', config.services.ml)
+);
+
+// Rutas de entrenamiento y gestión de modelos - solo admin
+router.post(
+  '/train/train',
+  verifyToken,
+  trainRateLimiter,
+  (req, res, next) => {
+    if (req.user && req.user.rol === 'admin') {
+      next();
+    } else {
+      res.status(403).json({
+        status: 'error',
+        message: 'Acceso denegado. Se requieren permisos de administrador.'
+      });
+    }
+  },
+  proxy.createServiceProxy('ml', config.services.ml)
+);
+
+router.get(
+  '/train/models',
+  verifyToken,
+  defaultRateLimiter,
+  (req, res, next) => {
+    if (req.user && req.user.rol === 'admin') {
+      next();
+    } else {
+      res.status(403).json({
+        status: 'error',
+        message: 'Acceso denegado. Se requieren permisos de administrador.'
+      });
+    }
+  },
+  proxy.createServiceProxy('ml', config.services.ml)
+);
+
+router.post(
+  '/train/models/:model_id/activate',
+  verifyToken,
+  defaultRateLimiter,
+  (req, res, next) => {
+    if (req.user && req.user.rol === 'admin') {
+      next();
+    } else {
+      res.status(403).json({
+        status: 'error',
+        message: 'Acceso denegado. Se requieren permisos de administrador.'
+      });
+    }
+  },
+  proxy.createServiceProxy('ml', config.services.ml)
+);
+
+router.delete(
+  '/train/models/:model_id',
+  verifyToken,
+  defaultRateLimiter,
+  (req, res, next) => {
+    if (req.user && req.user.rol === 'admin') {
+      next();
+    } else {
+      res.status(403).json({
+        status: 'error',
+        message: 'Acceso denegado. Se requieren permisos de administrador.'
+      });
+    }
+  },
+  proxy.createServiceProxy('ml', config.services.ml)
+);
+
+// Rutas de chatbot
+router.post(
+  '/chatbot/chat',
+  verifyToken,
+  defaultRateLimiter,
+  proxy.createServiceProxy('ml', config.services.ml)
+);
 
 export default router;

@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors'); 
 const { emailConfig } = require('./config');
 const routes = require('./routes');
 const schedulerService = require('./services/scheduler.service');
@@ -7,6 +8,14 @@ const logger = require('./utils/logger');
 
 // Inicializar la aplicación Express
 const app = express();
+
+// Configurar CORS
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000', // Permitir origen de tu frontend
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json());
 
 // Verificar la conexión con el servidor de correo al iniciar
