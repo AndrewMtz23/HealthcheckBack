@@ -231,3 +231,105 @@ class TwitterScraper:
         
         logger.info(f"Scraping de Twitter completado. Se procesaron {len(processed_news_ids)} tweets de un total de {tweets_processed} analizados.")
         return processed_news_ids
+
+    def get_tweets_without_saving(self, query="noticias salud", start_date=None, end_date=None, limit=10, min_length=50):
+        """
+        Scrapea tweets según los criterios especificados, los clasifica pero NO los guarda en la base de datos.
+        En su lugar, devuelve los resultados como una lista de diccionarios.
+        
+        Args:
+            query (str): Términos de búsqueda para Twitter
+            start_date (str): Fecha de inicio en formato YYYY-MM-DD
+            end_date (str): Fecha de fin en formato YYYY-MM-DD
+            limit (int): Número máximo de tweets a procesar
+            min_length (int): Longitud mínima del contenido del tweet
+            
+        Returns:
+            list: Lista de diccionarios con los datos de los tweets
+        """
+        # Inicializar y hacer login
+        self._init_driver()
+        if not self.login():
+            self.close_driver()
+            return []
+        
+        # Configurar fechas por defecto si no se proporcionan
+        if not start_date:
+            start_date = (datetime.now().replace(day=1)).strftime("%Y-%m-%d")
+        if not end_date:
+            end_date = datetime.now().strftime("%Y-%m-%d")
+        
+        # Construir URL de búsqueda
+        search_url = f"https://x.com/search?q={query.replace(' ', '+')}&src=typed_query"
+        if start_date and end_date:
+            search_url += f"&since={start_date}&until={end_date}"
+        
+        self.driver.get(search_url)
+        time.sleep(5)
+        
+        if self._check_for_error_message():
+            self.close_driver()
+            return []
+        
+        # Lista para almacenar los resultados
+        results = []
+        tweets_processed = 0
+        
+        # Procesar tweets hasta alcanzar el límite
+        while len(results) < limit:
+            self._scroll_down(3)
+            tweets = self.driver.find_elements(By.CSS_SELECTOR, '[data-testid="tweet"]')
+            
+            # Si no hay más tweets para cargar, salir del bucle
+            if not tweets:
+                break
+                
+            for tweet in tweets:
+                # Evitar procesar tweets ya vistos
+                tweet_data = self._extract_tweet_content(tweet)
+                if not tweet_data or len(tweet_data["content"]) < min_length:
+                    continue
+                
+                tweets_processed += 1
+                
+                try:
+                    # Clasificar el tema
+                    tema_nombre, _ = classify_topic(tweet_data["content"])
+                    
+                    # Extraer keywords
+                    keywords = extract_keywords(tweet_data["content"], num_keywords=5)
+                    
+                    # Clasificar el tweet (verdadero/falso)
+                    resultado, confianza, explicacion = predict_news(tweet_data["content"])
+                    
+                    # Crear objeto de resultado
+                    tweet_item = {
+                        "autor": tweet_data["author"],
+                        "fecha": tweet_data["date"].isoformat(),
+                        "url": tweet_data["url"],
+                        "contenido": tweet_data["content"],
+                        "tema": tema_nombre,
+                        "clasificacion": resultado,
+                        "confianza": confianza,
+                        "explicacion": explicacion,
+                        "palabras_clave": keywords
+                    }
+                    
+                    # Añadir a la lista de resultados
+                    results.append(tweet_item)
+                    
+                    logger.info(f"Tweet analizado (sin guardar): {tweet_data['author']} | Clasificación: {resultado} ({confianza}%)")
+                    
+                    # Si hemos alcanzado el límite, salir
+                    if len(results) >= limit:
+                        break
+                        
+                except Exception as e:
+                    logger.error(f"Error al analizar tweet: {str(e)}")
+                    continue
+        
+        # Cerrar el driver
+        self.close_driver()
+        
+        logger.info(f"Análisis de Twitter completado. Se analizaron {len(results)} tweets de un total de {tweets_processed} encontrados.")
+        return results

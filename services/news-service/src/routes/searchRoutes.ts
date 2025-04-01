@@ -8,6 +8,5 @@ const router = Router();
 router.get('/', searchController.searchNews);
 
 // Ruta de búsqueda avanzada (requiere autenticación)
-router.post('/advanced', authenticate, searchController.advancedSearch);
 
 export default router;

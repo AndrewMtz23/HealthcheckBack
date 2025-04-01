@@ -1,13 +1,17 @@
 import { Request, Response } from 'express';
 import Interaction from '../models/Interaction';
+import News from '../models/News';
 
-// Registrar una interacción con una noticia
-export const createInteraction = async (req: Request, res: Response): Promise<void> => {
+/**
+ * Crea o actualiza una interacción de usuario con una noticia
+ */
+export const createOrUpdateInteraction = async (req: Request, res: Response): Promise<void> => {
   try {
+    // Verificar autenticación
     if (!req.user) {
       res.status(401).json({
         status: 'error',
-        message: 'Usuario no autenticado',
+        message: 'Usuario no autenticado'
       });
       return;
     }
@@ -15,62 +19,103 @@ export const createInteraction = async (req: Request, res: Response): Promise<vo
     const { noticia_id, tipo_interaccion } = req.body;
     const usuario_id = req.user.id;
 
+    // Validar parámetros
+    if (!noticia_id || !tipo_interaccion) {
+      res.status(400).json({
+        status: 'error',
+        message: 'Se requiere noticia_id y tipo_interaccion'
+      });
+      return;
+    }
+
+    // Validar que la noticia exista
+    const noticia = await News.findByPk(noticia_id);
+    if (!noticia) {
+      res.status(404).json({
+        status: 'error',
+        message: 'Noticia no encontrada'
+      });
+      return;
+    }
+
     // Validar tipo de interacción
     if (!['marcar_confiable', 'marcar_dudosa', 'compartir'].includes(tipo_interaccion)) {
       res.status(400).json({
         status: 'error',
-        message: 'Tipo de interacción no válido',
+        message: 'Tipo de interacción no válido'
       });
       return;
     }
 
-    // Verificar si ya existe una interacción similar
+    // Buscar interacciones existentes
     const existingInteraction = await Interaction.findOne({
       where: {
         usuario_id,
         noticia_id,
-        tipo_interaccion,
-      },
+        tipo_interaccion
+      }
     });
 
-    if (existingInteraction) {
-      res.status(400).json({
-        status: 'error',
-        message: 'Ya existe una interacción similar para esta noticia',
+    // Si ya existe esta interacción exacta y no es "compartir", eliminarla (toggle)
+    if (existingInteraction && tipo_interaccion !== 'compartir') {
+      await existingInteraction.destroy();
+      
+      res.status(200).json({
+        status: 'success',
+        message: 'Interacción eliminada correctamente',
+        action: 'removed'
       });
       return;
     }
 
-    // Crear nueva interacción
-    const interaction = await Interaction.create({
-      usuario_id,
-      noticia_id,
-      tipo_interaccion,
-    });
+    // Si es una interacción de valoración (confiable/dudosa), eliminar la opuesta si existe
+    if (tipo_interaccion === 'marcar_confiable' || tipo_interaccion === 'marcar_dudosa') {
+      const oppositeType = tipo_interaccion === 'marcar_confiable' ? 'marcar_dudosa' : 'marcar_confiable';
+      
+      await Interaction.destroy({
+        where: {
+          usuario_id,
+          noticia_id,
+          tipo_interaccion: oppositeType
+        }
+      });
+    }
 
-    res.status(201).json({
-      status: 'success',
-      message: 'Interacción registrada correctamente',
-      data: {
-        interaction,
-      },
-    });
+    // Si no existe o es "compartir", crear nueva interacción
+    if (!existingInteraction || tipo_interaccion === 'compartir') {
+      const interaction = await Interaction.create({
+        usuario_id,
+        noticia_id,
+        tipo_interaccion
+      });
+
+      res.status(201).json({
+        status: 'success',
+        message: 'Interacción registrada correctamente',
+        data: { interaction },
+        action: 'created'
+      });
+      return;
+    }
   } catch (error) {
-    console.error('Error al crear interacción:', error);
+    console.error('Error al gestionar interacción:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Error al registrar interacción',
+      message: 'Error al procesar la interacción'
     });
   }
 };
 
-// Obtener interacciones de un usuario
+/**
+ * Obtiene las interacciones de un usuario
+ */
 export const getUserInteractions = async (req: Request, res: Response): Promise<void> => {
   try {
+    // Verificar autenticación
     if (!req.user) {
       res.status(401).json({
         status: 'error',
-        message: 'Usuario no autenticado',
+        message: 'Usuario no autenticado'
       });
       return;
     }
@@ -80,14 +125,19 @@ export const getUserInteractions = async (req: Request, res: Response): Promise<
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = (page - 1) * limit;
 
+    // Obtener interacciones del usuario con información básica de las noticias
     const { count, rows } = await Interaction.findAndCountAll({
       where: { usuario_id },
       limit,
       offset,
       order: [['fecha_interaccion', 'DESC']],
       include: [
-        // Incluir la noticia relacionada
-      ],
+        {
+          model: News,
+          as: 'noticia',
+          attributes: ['id', 'titulo', 'url', 'fecha_publicacion']
+        }
+      ]
     });
 
     res.status(200).json({
@@ -96,19 +146,69 @@ export const getUserInteractions = async (req: Request, res: Response): Promise<
         total: count,
         currentPage: page,
         totalPages: Math.ceil(count / limit),
-        interactions: rows,
-      },
+        interactions: rows
+      }
     });
   } catch (error) {
     console.error('Error al obtener interacciones del usuario:', error);
     res.status(500).json({
       status: 'error',
-      message: 'Error al obtener interacciones',
+      message: 'Error al obtener interacciones'
+    });
+  }
+};
+
+/**
+ * Obtiene el estado de interacción de un usuario con una noticia específica
+ */
+export const getInteractionStatus = async (req: Request, res: Response): Promise<void> => {
+  try {
+    // Verificar autenticación
+    if (!req.user) {
+      res.status(401).json({
+        status: 'error',
+        message: 'Usuario no autenticado'
+      });
+      return;
+    }
+
+    const usuario_id = req.user.id;
+    const noticia_id = parseInt(req.params.noticiaId);
+
+    // Obtener todas las interacciones del usuario con esta noticia
+    const interactions = await Interaction.findAll({
+      where: {
+        usuario_id,
+        noticia_id
+      },
+      attributes: ['tipo_interaccion']
+    });
+
+    // Crear un objeto con el estado de cada tipo de interacción
+    const interactionTypes = ['marcar_confiable', 'marcar_dudosa', 'compartir'];
+    const status = interactionTypes.reduce((acc: Record<string, boolean>, type) => {
+      acc[type] = interactions.some(i => i.tipo_interaccion === type);
+      return acc;
+    }, {});
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        noticia_id,
+        interactions: status
+      }
+    });
+  } catch (error) {
+    console.error('Error al obtener estado de interacción:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al obtener estado de interacción'
     });
   }
 };
 
 export default {
-  createInteraction,
+  createOrUpdateInteraction,
   getUserInteractions,
+  getInteractionStatus
 };
