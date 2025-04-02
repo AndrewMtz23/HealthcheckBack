@@ -8,6 +8,7 @@ import ModeloML from '../models/ModeloML';
 
 /**
  * Obtiene un feed de noticias recientes, filtradas por URL y fecha válidas
+ * También soporta filtrado opcional por clasificación
  */
 export const getNewsFeed = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -15,6 +16,11 @@ export const getNewsFeed = async (req: Request, res: Response): Promise<void> =>
     const limit = parseInt(req.query.limit as string) || 10;
     const offset = (page - 1) * limit;
     const isAdmin = req.user?.rol === 'admin';
+    
+    // Obtener parámetro de clasificación
+    const clasificacion = req.query.clasificacion as string;
+    
+    console.log('Obteniendo noticias con parámetros:', { page, limit, clasificacion, isAdmin });
 
     // Construir condiciones de filtrado
     const whereConditions: any = {};
@@ -22,12 +28,10 @@ export const getNewsFeed = async (req: Request, res: Response): Promise<void> =>
     // Solo filtrar por URL y fecha válidas si no es admin
     if (!isAdmin) {
       whereConditions.url = {
-        [Op.and]: {
-          [Op.and]: [
-            { [Op.ne]: null },
-            { [Op.ne]: '' }
-          ]
-        }
+        [Op.ne]: null,
+      };
+      whereConditions.url = {
+        [Op.ne]: '',
       };
       whereConditions.fecha_publicacion = {
         [Op.ne]: null
@@ -35,19 +39,7 @@ export const getNewsFeed = async (req: Request, res: Response): Promise<void> =>
     }
 
     // Incluir relaciones
-    const includeOptions = [
-      {
-        model: ClasificacionNoticia,
-        as: 'clasificaciones',
-        attributes: ['resultado', 'confianza', 'explicacion', 'fecha_clasificacion'],
-        include: [
-          {
-            model: ModeloML,
-            as: 'modelo',
-            attributes: ['nombre', 'version', 'precision', 'recall', 'f1_score']
-          }
-        ]
-      },
+    const includeOptions: any[] = [
       {
         model: Tema,
         as: 'tema',
@@ -59,6 +51,40 @@ export const getNewsFeed = async (req: Request, res: Response): Promise<void> =>
         attributes: ['nombre', 'url', 'confiabilidad']
       }
     ];
+    
+    // Si hay filtro de clasificación, incluir con condición
+    if (clasificacion && ['verdadera', 'falsa', 'dudosa'].includes(clasificacion)) {
+      console.log(`Aplicando filtro de clasificación: ${clasificacion}`);
+      includeOptions.push({
+        model: ClasificacionNoticia,
+        as: 'clasificaciones',
+        where: { resultado: clasificacion },
+        attributes: ['resultado', 'confianza', 'explicacion', 'fecha_clasificacion'],
+        include: [
+          {
+            model: ModeloML,
+            as: 'modelo',
+            attributes: ['nombre', 'version', 'precision', 'recall', 'f1_score']
+          }
+        ],
+        required: true  // Esto es importante para que el filtro funcione correctamente
+      });
+    } else {
+      // Incluir clasificaciones sin filtro
+      includeOptions.push({
+        model: ClasificacionNoticia,
+        as: 'clasificaciones',
+        attributes: ['resultado', 'confianza', 'explicacion', 'fecha_clasificacion'],
+        include: [
+          {
+            model: ModeloML,
+            as: 'modelo',
+            attributes: ['nombre', 'version', 'precision', 'recall', 'f1_score']
+          }
+        ],
+        required: false
+      });
+    }
 
     // Ejecutar consulta
     const { count, rows } = await News.findAndCountAll({
@@ -66,8 +92,11 @@ export const getNewsFeed = async (req: Request, res: Response): Promise<void> =>
       limit,
       offset,
       order: [['fecha_publicacion', 'DESC']],
-      include: includeOptions
+      include: includeOptions,
+      distinct: true  // Necesario para contar correctamente con JOINs
     });
+    
+    console.log(`Consulta completada. Encontradas ${rows.length} noticias de ${count} total`);
 
     // Devolver resultados
     res.status(200).json({
@@ -76,6 +105,7 @@ export const getNewsFeed = async (req: Request, res: Response): Promise<void> =>
         total: count,
         currentPage: page,
         totalPages: Math.ceil(count / limit),
+        clasificacion: clasificacion || null,
         news: rows
       }
     });
@@ -94,6 +124,8 @@ export const getNewsFeed = async (req: Request, res: Response): Promise<void> =>
 export const getNewsById = async (req: Request, res: Response): Promise<void> => {
   try {
     const id = parseInt(req.params.id);
+    
+    console.log(`Buscando noticia con ID: ${id}`);
 
     // Incluir relaciones
     const includeOptions = [
@@ -128,6 +160,7 @@ export const getNewsById = async (req: Request, res: Response): Promise<void> =>
 
     // Verificar si la noticia existe
     if (!news) {
+      console.log(`Noticia con ID ${id} no encontrada`);
       res.status(404).json({
         status: 'error',
         message: 'Noticia no encontrada'

@@ -7,7 +7,7 @@ import Fuente from '../models/Fuente';
 import ModeloML from '../models/ModeloML';
 
 /**
- * Endpoint unificado de búsqueda que soporta tanto búsqueda simple como avanzada
+ * Endpoint unificado de búsqueda que soporta múltiples filtros
  */
 export const searchNews = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -17,33 +17,31 @@ export const searchNews = async (req: Request, res: Response): Promise<void> => 
     const isAdmin = req.user?.rol === 'admin';
     
     // Obtener parámetros de búsqueda
-    // Desde query params (GET) o body (POST)
-    const isAdvanced = req.method === 'POST';
-    const searchParams = isAdvanced ? req.body : req.query;
+    const query = req.query.q as string || '';  // Consulta opcional
+    const clasificacion = req.query.clasificacion as string || ''; // Clasificación opcional
+    const temaId = req.query.temaId ? parseInt(req.query.temaId as string) : null; // ID de tema
+    const fuenteId = req.query.fuenteId ? parseInt(req.query.fuenteId as string) : null; // ID de fuente
     
-    // Texto de búsqueda
-    const query = searchParams.q || searchParams.query;
+    // Parsear fechas
+    const fechaInicio = req.query.fechaInicio ? new Date(req.query.fechaInicio as string) : null;
+    const fechaFin = req.query.fechaFin ? new Date(req.query.fechaFin as string) : null;
     
-    // Parámetros adicionales para búsqueda avanzada
-    const clasificacion = searchParams.clasificacion;
-    const temaId = parseInt(searchParams.temaId) || null;
-    const fuenteId = parseInt(searchParams.fuenteId) || null;
-    const fechaInicio = searchParams.fechaInicio ? new Date(searchParams.fechaInicio) : null;
-    const fechaFin = searchParams.fechaFin ? new Date(searchParams.fechaFin) : null;
-    
-    // Validar que exista al menos un parámetro de búsqueda
-    if (!query && !clasificacion && !temaId && !fuenteId && !fechaInicio && !fechaFin) {
-      res.status(400).json({
-        status: 'error',
-        message: 'Se requiere al menos un criterio de búsqueda'
-      });
-      return;
-    }
+    console.log('Búsqueda con parámetros:', { 
+      query, 
+      clasificacion, 
+      temaId, 
+      fuenteId, 
+      fechaInicio, 
+      fechaFin, 
+      page, 
+      limit, 
+      isAdmin 
+    });
     
     // Construir condiciones WHERE
     const whereConditions: any = {};
     
-    // Añadir condición de texto
+    // Añadir condición de texto si hay consulta
     if (query && query.trim() !== '') {
       whereConditions[Op.or] = [
         { titulo: { [Op.iLike]: `%${query}%` } },
@@ -85,17 +83,17 @@ export const searchNews = async (req: Request, res: Response): Promise<void> => 
       {
         model: Tema,
         as: 'tema',
-        attributes: ['nombre']
+        attributes: ['id', 'nombre']
       },
       {
         model: Fuente,
         as: 'fuente',
-        attributes: ['nombre', 'url', 'confiabilidad']
+        attributes: ['id', 'nombre', 'url', 'confiabilidad']
       }
     ];
     
-    // Incluir clasificación con condición adicional si se especifica
-    if (clasificacion) {
+    // Incluir clasificación con condición si se especifica
+    if (clasificacion && ['verdadera', 'falsa', 'dudosa'].includes(clasificacion)) {
       includeOptions.push({
         model: ClasificacionNoticia,
         as: 'clasificaciones',
@@ -107,7 +105,8 @@ export const searchNews = async (req: Request, res: Response): Promise<void> => 
             as: 'modelo',
             attributes: ['nombre', 'version', 'precision', 'recall', 'f1_score']
           }
-        ]
+        ],
+        required: true // IMPORTANTE: Esto hace un INNER JOIN en lugar de LEFT JOIN
       });
     } else {
       includeOptions.push({
@@ -120,9 +119,12 @@ export const searchNews = async (req: Request, res: Response): Promise<void> => 
             as: 'modelo',
             attributes: ['nombre', 'version', 'precision', 'recall', 'f1_score']
           }
-        ]
+        ],
+        required: false
       });
     }
+    
+    console.log('Condiciones de búsqueda:', JSON.stringify(whereConditions, null, 2));
     
     // Ejecutar búsqueda
     const { count, rows } = await News.findAndCountAll({
@@ -134,6 +136,8 @@ export const searchNews = async (req: Request, res: Response): Promise<void> => 
       distinct: true // Importante para contar correctamente con relaciones
     });
     
+    console.log(`Búsqueda completada: ${rows.length} resultados de ${count} total`);
+    
     // Devolver resultados
     res.status(200).json({
       status: 'success',
@@ -142,6 +146,11 @@ export const searchNews = async (req: Request, res: Response): Promise<void> => 
         currentPage: page,
         totalPages: Math.ceil(count / limit),
         query,
+        clasificacion,
+        temaId,
+        fuenteId,
+        fechaInicio: fechaInicio?.toISOString(),
+        fechaFin: fechaFin?.toISOString(),
         results: rows
       }
     });
