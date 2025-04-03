@@ -225,6 +225,8 @@ export const getInteractionStatus = async (req: Request, res: Response): Promise
   }
 };
 
+// Actualización para getInteractionCounts en interactionController.ts
+
 export const getInteractionCounts = async (req: Request, res: Response): Promise<void> => {
   try {
     const noticiaId = parseInt(req.params.noticiaId);
@@ -267,6 +269,7 @@ export const getInteractionCounts = async (req: Request, res: Response): Promise
     });
   }
 };
+
 export default {
   createOrUpdateInteraction,
   getUserInteractions,
