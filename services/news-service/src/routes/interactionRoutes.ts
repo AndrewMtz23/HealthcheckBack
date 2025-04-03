@@ -10,5 +10,6 @@ router.use(authenticate);
 router.post('/', interactionController.createOrUpdateInteraction);
 router.get('/user', interactionController.getUserInteractions);
 router.get('/:noticiaId/status', interactionController.getInteractionStatus);
+router.get('/:noticiaId/counts', interactionController.getInteractionCounts);
 
 export default router;

@@ -47,7 +47,28 @@ export const createOrUpdateInteraction = async (req: Request, res: Response): Pr
       return;
     }
 
-    // Buscar interacciones existentes
+    // Para compartir, verificar si ya existe una interacción previa
+    if (tipo_interaccion === 'compartir') {
+      const existingInteraction = await Interaction.findOne({
+        where: {
+          usuario_id,
+          noticia_id,
+          tipo_interaccion: 'compartir'
+        }
+      });
+
+      // Si ya existe una interacción de compartir, no hacer nada
+      if (existingInteraction) {
+        res.status(200).json({
+          status: 'success',
+          message: 'Compartido previamente',
+          action: 'already_shared'
+        });
+        return;
+      }
+    }
+
+    // Resto del código para otras interacciones (marcar_confiable, marcar_dudosa)
     const existingInteraction = await Interaction.findOne({
       where: {
         usuario_id,
@@ -81,22 +102,19 @@ export const createOrUpdateInteraction = async (req: Request, res: Response): Pr
       });
     }
 
-    // Si no existe o es "compartir", crear nueva interacción
-    if (!existingInteraction || tipo_interaccion === 'compartir') {
-      const interaction = await Interaction.create({
-        usuario_id,
-        noticia_id,
-        tipo_interaccion
-      });
+    // Crear nueva interacción
+    const interaction = await Interaction.create({
+      usuario_id,
+      noticia_id,
+      tipo_interaccion
+    });
 
-      res.status(201).json({
-        status: 'success',
-        message: 'Interacción registrada correctamente',
-        data: { interaction },
-        action: 'created'
-      });
-      return;
-    }
+    res.status(201).json({
+      status: 'success',
+      message: 'Interacción registrada correctamente',
+      data: { interaction },
+      action: 'created'
+    });
   } catch (error) {
     console.error('Error al gestionar interacción:', error);
     res.status(500).json({
@@ -207,8 +225,51 @@ export const getInteractionStatus = async (req: Request, res: Response): Promise
   }
 };
 
+export const getInteractionCounts = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const noticiaId = parseInt(req.params.noticiaId);
+
+    // Contar likes, dislikes y shares
+    const [likesCount, dislikesCount, sharesCount] = await Promise.all([
+      Interaction.count({
+        where: {
+          noticia_id: noticiaId,
+          tipo_interaccion: 'marcar_confiable'
+        }
+      }),
+      Interaction.count({
+        where: {
+          noticia_id: noticiaId,
+          tipo_interaccion: 'marcar_dudosa'
+        }
+      }),
+      Interaction.count({
+        where: {
+          noticia_id: noticiaId,
+          tipo_interaccion: 'compartir'
+        }
+      })
+    ]);
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        likes: likesCount,
+        dislikes: dislikesCount,
+        shares: sharesCount
+      }
+    });
+  } catch (error) {
+    console.error('Error al obtener conteo de interacciones:', error);
+    res.status(500).json({
+      status: 'error',
+      message: 'Error al obtener conteo de interacciones'
+    });
+  }
+};
 export default {
   createOrUpdateInteraction,
   getUserInteractions,
-  getInteractionStatus
+  getInteractionStatus,
+  getInteractionCounts
 };

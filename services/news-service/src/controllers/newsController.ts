@@ -48,7 +48,7 @@ export const getNewsFeed = async (req: Request, res: Response): Promise<void> =>
       {
         model: Fuente,
         as: 'fuente',
-        attributes: ['nombre', 'url', 'confiabilidad']
+        attributes: ['id', 'nombre', 'url', 'confiabilidad']
       }
     ];
     
@@ -149,7 +149,7 @@ export const getNewsById = async (req: Request, res: Response): Promise<void> =>
       {
         model: Fuente,
         as: 'fuente',
-        attributes: ['nombre', 'url', 'confiabilidad']
+        attributes: ['id', 'nombre', 'url', 'confiabilidad']
       }
     ];
 
