@@ -40,10 +40,9 @@ Este patrón proporciona flexibilidad para añadir nuevos tipos de notificación
 
 ## Instalación
 
-1. Clonar el repositorio:
+1. Abrir el servicio desde la raíz del proyecto:
    ```bash
-   git clone https://github.com/your-organization/healthcheck-notification-service.git
-   cd healthcheck-notification-service
+   cd services/notification-service
    ```
 
 2. Instalar dependencias:

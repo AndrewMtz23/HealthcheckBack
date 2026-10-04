@@ -6,6 +6,7 @@ import reportRoutes from './reportRoutes';
 import statsRoutes from './statsRoutes';
 import temasRoutes from './temasRoutes';
 import fuentesRoutes from './fuentesRoutes';
+import historyRoutes from './historyRoutes';
 
 const router = Router();
 
@@ -16,6 +17,7 @@ router.use('/reports', reportRoutes);
 router.use('/stats', statsRoutes);
 router.use('/temas', temasRoutes);
 router.use('/fuentes', fuentesRoutes);
+router.use('/history', historyRoutes);
 
 // Ruta de estado del API
 router.get('/health', (req, res) => {

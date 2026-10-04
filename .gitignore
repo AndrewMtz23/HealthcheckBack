@@ -1,0 +1,47 @@
+# Local configuration and credentials (safe examples may be committed)
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+
+# Node.js dependencies, builds and caches
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+.nyc_output/
+.turbo/
+.cache/
+*.tsbuildinfo
+
+# Python environments and generated files
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+*.egg-info/
+.ipynb_checkpoints/
+
+# Runtime output and local tools
+logs/
+*.log
+.vercel/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.tmp
+*.bak
+
+# Keep dependency lockfiles and the BERT model tracked (model uses Git LFS).
