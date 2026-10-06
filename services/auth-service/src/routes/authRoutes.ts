@@ -3,8 +3,12 @@ import * as authController from '../controllers/authController';
 import { authenticate } from '../middleware/auth';
 import { validate, registerValidationRules, loginValidationRules } from '../middleware/validation';
 import passport from 'passport';
+import adminUsers from '../admin/users';
+import profileRoutes from '../profile/routes';
 
 const router = Router();
+router.use('/admin/users', adminUsers);
+router.use('/profile', profileRoutes);
 
 // Rutas públicas
 router.post('/register', registerValidationRules, validate, authController.register);

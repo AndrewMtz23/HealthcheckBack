@@ -1,4 +1,5 @@
-from flask import Flask
+import os
+from flask import Flask, request, jsonify
 from api.routes.classify_routes import classify_bp
 from api.routes.train_routes import train_bp
 from api.routes.chatbot_routes import chatbot_bp
@@ -11,6 +12,13 @@ from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
+
+@app.before_request
+def diagnostic_read_only():
+    if os.environ.get('HEALTHCHECK_DIAGNOSTIC') == '1':
+        if request.method not in ('GET', 'HEAD') or request.path != '/api/ml/train/models':
+            return jsonify({'error': 'Operation disabled in diagnostic mode'}), 503
+
 
 # Cargar configuración desde `Config`
 app.config.from_object(Config)
@@ -32,4 +40,4 @@ if __name__ == "__main__":
             from core.classify_service import load_model
             load_model()
             
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=os.environ.get('HEALTHCHECK_DIAGNOSTIC') != '1')

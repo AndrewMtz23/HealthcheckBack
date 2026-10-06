@@ -7,8 +7,10 @@ import statsRoutes from './statsRoutes';
 import temasRoutes from './temasRoutes';
 import fuentesRoutes from './fuentesRoutes';
 import historyRoutes from './historyRoutes';
+import adminRoutes from '../admin/router';
 
 const router = Router();
+router.use('/admin', adminRoutes);
 
 router.use('/news', newsRoutes);
 router.use('/interactions', interactionRoutes);
