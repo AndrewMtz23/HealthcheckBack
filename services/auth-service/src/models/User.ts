@@ -8,6 +8,7 @@ interface UserAttributes {
   email: string;
   nombre: string;
   telefono?: string;
+  imagen_url?: string | null;
   contrasena?: string;
   rol: 'admin' | 'usuario';
   fecha_registro: Date;
@@ -25,6 +26,7 @@ class User extends Model<UserAttributes, UserCreationAttributes> implements User
   public email!: string;
   public nombre!: string;
   public telefono?: string;
+  public imagen_url?: string | null;
   public contrasena?: string;
   public rol!: 'admin' | 'usuario';
   public fecha_registro!: Date;
@@ -63,6 +65,7 @@ User.init(
       type: DataTypes.STRING,
       allowNull: true,
     },
+    imagen_url: { type: DataTypes.STRING(2048), allowNull: true },
     contrasena: {
       type: DataTypes.STRING,
       allowNull: true, // Permitimos null para usuarios de Google

@@ -3,6 +3,8 @@ import User from '../models/User';
 import { generateToken } from '../utils/jwt';
 import env from '../config/env';
 import { Op } from 'sequelize';
+import {ProfileError,validateProfile} from '../profile/validation';
+const profilePayload=(user:User)=>({id:user.id,email:user.email,nombre:user.nombre,telefono:user.telefono,imagen_url:user.imagen_url,rol:user.rol,fecha_registro:user.fecha_registro,ultima_conexion:user.ultima_conexion});
 
 /**
  * Registrar un nuevo usuario
@@ -44,12 +46,7 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       status: 'success',
       message: 'Usuario registrado correctamente',
       data: {
-        user: {
-          id: user.id,
-          email: user.email,
-          nombre: user.nombre,
-          rol: user.rol,
-        },
+        user: profilePayload(user),
         token,
       },
     });
@@ -104,12 +101,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       status: 'success',
       message: 'Inicio de sesión exitoso',
       data: {
-        user: {
-          id: user.id,
-          email: user.email,
-          nombre: user.nombre,
-          rol: user.rol,
-        },
+        user: profilePayload(user),
         token,
       },
     });
@@ -156,15 +148,7 @@ export const getProfile = async (req: Request, res: Response): Promise<void> => 
     res.status(200).json({
       status: 'success',
       data: {
-        user: {
-          id: user.id,
-          email: user.email,
-          nombre: user.nombre,
-          telefono: user.telefono,
-          rol: user.rol,
-          fecha_registro: user.fecha_registro,
-          ultima_conexion: user.ultima_conexion,
-        },
+        user: profilePayload(user),
       },
     });
   } catch (error) {
@@ -182,11 +166,7 @@ export const getProfile = async (req: Request, res: Response): Promise<void> => 
 export const updateProfile = async (req: Request, res: Response): Promise<void> => {
   try {
     const user = req.user as User;
-    const { nombre, telefono } = req.body;
-
-    // Actualizar datos
-    user.nombre = nombre || user.nombre;
-    user.telefono = telefono !== undefined ? telefono : user.telefono;
+    user.set(validateProfile(req.body));
     
     await user.save();
 
@@ -194,20 +174,14 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
       status: 'success',
       message: 'Perfil actualizado correctamente',
       data: {
-        user: {
-          id: user.id,
-          email: user.email,
-          nombre: user.nombre,
-          telefono: user.telefono,
-          rol: user.rol,
-        },
+        user: profilePayload(user),
       },
     });
   } catch (error) {
     console.error('Error al actualizar perfil:', error);
-    res.status(500).json({
+    res.status(error instanceof ProfileError ? error.status : 500).json({
       status: 'error',
-      message: 'Error al actualizar perfil de usuario',
+      message: error instanceof ProfileError ? error.message : 'Error al actualizar perfil de usuario',
     });
   }
 };

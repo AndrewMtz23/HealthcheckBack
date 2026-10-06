@@ -22,6 +22,7 @@ CREATE TABLE usuarios (
   email VARCHAR UNIQUE NOT NULL,
   nombre VARCHAR NOT NULL,
   telefono VARCHAR,
+  imagen_url VARCHAR(2048),
   contrasena VARCHAR,
   rol rol_enum NOT NULL DEFAULT 'usuario',
   fecha_registro TIMESTAMP DEFAULT now(),
