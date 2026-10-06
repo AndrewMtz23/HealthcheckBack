@@ -1,3 +1,4 @@
+import os
 import time
 import threading
 import schedule
@@ -54,6 +55,8 @@ def run_scheduler(app):
 
 def start_scheduler(app):
     """Inicia el scheduler en un hilo separado"""
+    if os.environ.get('HEALTHCHECK_DIAGNOSTIC') == '1':
+        return
     scheduler_thread = threading.Thread(target=run_scheduler, args=(app,))
     scheduler_thread.daemon = True  # El hilo se cerrará cuando termine el programa principal
     scheduler_thread.start()
