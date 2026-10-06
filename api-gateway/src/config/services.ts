@@ -26,6 +26,13 @@ const services: ServiceDefinition[] = [
       { path: '/google/failure', auth: false },
       // Rutas protegidas que requieren autenticación
       { path: '/profile', auth: true },
+      { path: '/profile/preferences', auth: true },
+      { path: '/profile/topics', auth: true },
+      { path: '/profile/topics/:topicId', auth: true },
+      { path: '/profile/notifications', auth: true },
+      { path: '/profile/notifications/:notificationId', auth: true },
+      { path: '/admin/users', auth: true },
+      { path: '/admin/users/:id', auth: true },
       { path: '/logout', auth: true },
     ],
   },
