@@ -7,7 +7,7 @@ const root=path.resolve(__dirname,'..'),instance=require('node:crypto').randomUU
 const database='admin_test_'+Date.now();const cfg={host:'127.0.0.1',port:55432,user:'phase00',password:'unused'};
 const children=[];let checks=0;let db;let control;
 const secret='isolated-admin-test-only';
-const token=id=>jwt.sign({id,rol:'admin'},secret,{expiresIn:'5m'});
+const sessions=new Map(); const token=id=>sessions.get(id)||jwt.sign({id,rol:'admin'},secret,{expiresIn:'5m'});
 async function request(service,route,status=200,body,method='GET',id=1){const port=service==='auth'?13001:13003;const response=await fetch(`http://127.0.0.1:${port}/api/${service==='auth'?'auth/':''}admin/${route}`,{method,headers:{'Content-Type':'application/json',...(id?{Authorization:`Bearer ${token(id)}`}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(10000)});assert.equal(response.headers.get('x-healthcheck-test-instance'),instance);const result=await response.json();assert.equal(response.status,status,`${service}/${route}: ${JSON.stringify(result)}`);checks++;return result.data;}
 async function free(port){await new Promise((resolve,reject)=>{const server=require('node:net').createServer();server.once('error',reject);server.listen(port,'127.0.0.1',()=>server.close(resolve));});}
 (async()=>{try{
@@ -19,9 +19,16 @@ async function free(port){await new Promise((resolve,reject)=>{const server=requ
  await db.query("INSERT INTO fuentes(id,nombre,confiabilidad) VALUES(1,'Test source',0.8)");await db.query("SELECT setval('fuentes_id_seq',10)");
  await db.query("INSERT INTO noticias(id,titulo,contenido,fecha_publicacion,fuente_id) VALUES(1,'Unclassified','Test',NULL,1),(2,'Twice classified','Test','2026-10-05',1)");
  await db.query("INSERT INTO clasificacion_noticias(noticia_id,resultado,fecha_clasificacion) VALUES(2,'verdadera','2026-10-01'),(2,'falsa','2026-10-02')");await db.query("INSERT INTO reportes_fuente(id,fuente_id,usuario_id,motivo) VALUES(1,1,3,'Synthetic report')");
- for(const [name,port] of [['auth',13001],['news',13003]]){const log=fs.openSync(path.resolve(root,`../.healthcheck-logs/admin-test-${name}.log`),'w');const child=spawn(process.execPath,['-r',path.join(root,'tests/support/http-instance.cjs'),'dist/app.js'],{cwd:path.join(root,`services/${name}-service`),env:{...process.env,DB_HOST:cfg.host,DB_PORT:String(cfg.port),DB_NAME:database,DB_USER:cfg.user,DB_PASSWORD:cfg.password,JWT_SECRET:secret,GOOGLE_CLIENT_ID:'disabled',GOOGLE_CLIENT_SECRET:'disabled',NODE_ENV:'test',HEALTHCHECK_DIAGNOSTIC:'1',HEALTHCHECK_TEST_INSTANCE:instance,PGOPTIONS:'-c default_transaction_read_only=off -c statement_timeout=10000',PORT:String(port)},stdio:['ignore',log,log],windowsHide:true});children.push(child);fs.closeSync(log);}
+ for(const [name,port] of [['auth',13001],['news',13003]]){const log=fs.openSync(path.resolve(root,`../.healthcheck-logs/admin-test-${name}.log`),'w');const child=spawn(process.execPath,['-r',path.join(root,'tests/support/http-instance.cjs'),'dist/app.js'],{cwd:path.join(root,`services/${name}-service`),env:{...process.env,DB_HOST:cfg.host,DB_PORT:String(cfg.port),DB_NAME:database,DB_USER:cfg.user,DB_PASSWORD:cfg.password,JWT_SECRET:secret,AUTH_SERVICE_URL:'http://127.0.0.1:13001',GOOGLE_CLIENT_ID:'disabled',GOOGLE_CLIENT_SECRET:'disabled',NODE_ENV:'test',HEALTHCHECK_DIAGNOSTIC:'1',HEALTHCHECK_TEST_INSTANCE:instance,PGOPTIONS:'-c default_transaction_read_only=off -c statement_timeout=10000',PORT:String(port)},stdio:['ignore',log,log],windowsHide:true});children.push(child);fs.closeSync(log);}
  let ready=false;for(let i=0;i<300;i++){try{const rs=await Promise.all([13001,13003].map(p=>fetch(`http://127.0.0.1:${p}/api/health`)));if(rs.every(r=>r.headers.get('x-healthcheck-test-instance')===instance)){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,150));}assert(ready,'Test services unavailable');
- await request('auth','users',401,undefined,'GET',null);await request('news','summary',401,undefined,'GET',null);await request('auth','users',403,undefined,'GET',3);await request('news','summary',403,undefined,'GET',3);await request('news','summary',403,undefined,'GET',4);
+ const initialPassword='Synthetic-admin-integration-123!';
+ await db.query('UPDATE usuarios SET contrasena=$1',[await bcrypt.hash(initialPassword,10)]);
+ for(const id of [1,2,3]) {
+  const email=(await db.query('SELECT email FROM usuarios WHERE id=$1',[id])).rows[0].email;
+  const response=await fetch('http://127.0.0.1:13001/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,contrasena:initialPassword})});
+  assert.equal(response.status,200); sessions.set(id,(await response.json()).data.token);
+ }
+ await request('auth','users',401,undefined,'GET',null);await request('news','summary',401,undefined,'GET',null);await request('auth','users',403,undefined,'GET',3);await request('news','summary',403,undefined,'GET',3);await request('news','summary',401,undefined,'GET',4);
  const users=await request('auth','users');assert.equal(users.total,4);assert(!JSON.stringify(users).includes('contrasena'));assert(!JSON.stringify(users).includes('google_id'));
  await request('auth','users/1',409,{activo:false},'PATCH');await request('auth','users/1',409,{rol:'usuario'},'PATCH');
  const password='ScratchPassword123!';const created=await request('auth','users',201,{nombre:'Created',email:'created@example.invalid',rol:'usuario',contrasena:password,imagen_url:'https://example.invalid/first.png'},'POST');assert(!('contrasena'in created));assert.equal(created.imagen_url,'https://example.invalid/first.png');
@@ -45,6 +52,7 @@ async function free(port){await new Promise((resolve,reject)=>{const server=requ
  await db.query("UPDATE usuarios SET rol='usuario' WHERE id=2");await request('news','summary',403,undefined,'GET',2);await request('auth','users',403,undefined,'GET',2);
  await db.query("UPDATE usuarios SET rol='admin' WHERE id=2");const responses=await Promise.all([fetch('http://127.0.0.1:13001/api/auth/admin/users/2',{method:'PATCH',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token(1)}`},body:JSON.stringify({rol:'usuario'})}),fetch('http://127.0.0.1:13001/api/auth/admin/users/1',{method:'PATCH',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token(2)}`},body:JSON.stringify({rol:'usuario'})})]);assert.equal(responses.filter(r=>r.status===200).length,1);assert.equal((await db.query("SELECT count(*)::int AS n FROM usuarios WHERE activo=true AND rol='admin'")).rows[0].n,1);checks++;
  assert.equal((await db.query('SELECT count(*)::int AS n FROM preferencias_usuario')).rows[0].n,0);assert.equal((await db.query('SELECT count(*)::int AS n FROM noticias')).rows[0].n,2);
- await require('./support/profile-cases.cjs')({db,secret,instance});
+ await require('./support/profile-cases.cjs')({db,secret,instance,sessions});
+ await require('./support/member-cases.cjs')({db,secret,instance,sessions});
  console.log(`PASS: ${checks} HTTP checks; password hashing, stale role denial, latest classification, report idempotency and concurrent admin protection. Scratch DB: ${database}`);
  }finally{for(const child of children)child.kill();if(db)await db.end();if(control)await control.end();}})().catch(e=>{console.error(e.message);process.exitCode=1;});

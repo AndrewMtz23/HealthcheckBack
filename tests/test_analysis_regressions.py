@@ -23,7 +23,7 @@ from api.routes import classify_routes as routes
 from utils import article_extractor as extractor
 
 SECRET = 'isolated-analysis-secret-not-for-deployment'
-HEADERS = {'X-Gateway-Secret': SECRET, 'X-User-Id': '1'}
+HEADERS = {'X-Gateway-Secret': SECRET, 'X-User-Id': '1', 'X-User-Role': 'usuario'}
 
 
 class AnalysisRegression(unittest.TestCase):

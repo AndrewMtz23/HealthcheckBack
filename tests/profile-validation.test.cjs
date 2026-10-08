@@ -8,5 +8,6 @@ test('profile accepts only permitted fields and safe image URLs',()=>{
 test('notification preferences validate all enums and subscription type',()=>{
  assert.throws(()=>validatePreferences({recibir_notificaciones:'false',frecuencia_notificaciones:'diaria',tipo_notificacion:'email'}));
  assert.throws(()=>validatePreferences({recibir_notificaciones:true,frecuencia_notificaciones:'hourly',tipo_notificacion:'email'}));
- assert.equal(validatePreferences({recibir_notificaciones:false,frecuencia_notificaciones:'semanal',tipo_notificacion:'sms'}).tipo_notificacion,'sms');
+ assert.throws(()=>validatePreferences({recibir_notificaciones:false,frecuencia_notificaciones:'semanal',tipo_notificacion:'sms'}));
+ assert.equal(validatePreferences({recibir_notificaciones:false,frecuencia_notificaciones:'semanal',tipo_notificacion:'email'}).tipo_notificacion,'email');
 });

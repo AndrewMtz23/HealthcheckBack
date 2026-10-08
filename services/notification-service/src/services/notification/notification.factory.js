@@ -1,6 +1,4 @@
 const EmailNotifier = require('./email.notifier');
-const SMSNotifier = require('./sms.notifier');
-const logger = require('../../utils/logger');
 
 /**
  * Factory para crear notificadores según el tipo
@@ -9,18 +7,15 @@ const logger = require('../../utils/logger');
 class NotificationFactory {
   /**
    * Crea y devuelve el notificador adecuado según el tipo
-   * @param {string} type - Tipo de notificación ('email' o 'sms')
+   * @param {string} type - Canal admitido: email
    * @returns {Object} - Instancia del notificador apropiado
    */
   createNotifier(type) {
     switch (type.toLowerCase()) {
       case 'email':
         return new EmailNotifier();
-      case 'sms':
-        return new SMSNotifier();
       default:
-        logger.warn(`Tipo de notificación no soportado: ${type}. Usando email por defecto.`);
-        return new EmailNotifier();
+        throw new Error('Canal de notificaciones retirado o no compatible');
     }
   }
 }

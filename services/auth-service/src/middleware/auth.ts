@@ -7,7 +7,8 @@ import passport from 'passport';
 export const authenticate = (req: Request, res: Response, next: NextFunction): void => {
   passport.authenticate('jwt', { session: false }, (err: Error, user: any) => {
     if (err) {
-      return next(err);
+      res.status(503).json({status:'error', message:'No se pudo validar la sesión. Intenta de nuevo.'});
+      return;
     }
     
     if (!user) {

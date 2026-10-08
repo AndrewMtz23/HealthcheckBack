@@ -121,12 +121,8 @@ class SchedulerService {
           const mensaje = `HealthCheck ha detectado información falsa: "${noticia.titulo}" (${noticia.confianza}% de probabilidad)`;
           
           // Determinar tipo de notificación
-          let tipo = user.tipo_notificacion || 'email';
-          if ((tipo === 'email' && !user.email) || (tipo === 'sms' && !user.telefono)) {
-            if (tipo === 'email' && user.telefono) tipo = 'sms';
-            else if (tipo === 'sms' && user.email) tipo = 'email';
-            else continue;
-          }
+          if (user.tipo_notificacion !== 'email' || !user.email) continue;
+          const tipo = 'email';
           
           pendingNotifications.push({
             usuario_id: user.id,
@@ -186,6 +182,7 @@ class SchedulerService {
     const result = {};
     
     for (const notification of notifications) {
+      if (notification.tipo !== 'email') continue;
       const type = notification.tipo;
       
       if (!result[type]) {
