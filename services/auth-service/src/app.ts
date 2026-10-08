@@ -20,6 +20,7 @@ app.use(cors({
 })); // Configuración de CORS
 app.use(express.json()); // Parseo de JSON
 app.use(express.urlencoded({ extended: true })); // Parseo de formularios
+app.use('/api/auth', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
 
 // Inicializar Passport
 app.use(passport.initialize());

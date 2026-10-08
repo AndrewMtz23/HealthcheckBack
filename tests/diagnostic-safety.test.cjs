@@ -17,9 +17,10 @@ test('diagnostic email refuses delivery without creating SMTP transport', async(
   const cfg=load('config/email.js', {nodemailer:{createTransport(){throw Error('SMTP initialized');}}});
   await assert.rejects(cfg.transporter.sendMail({}), /disabled/i);
 });
-test('diagnostic SMS refuses delivery without initializing Twilio', async()=>{
-  const cfg=load('config/sms.js', {twilio(){throw Error('Twilio initialized');}});
-  await assert.rejects(cfg.client.messages.create({}), /disabled/i);
+test('retired SMS never falls back to email delivery', ()=>{
+  const factory=load('services/notification/notification.factory.js', {'./email.notifier':class EmailNotifier {}});
+  assert.throws(()=>factory.createNotifier('sms'), /retirado/);
+  assert.throws(()=>factory.createNotifier('unknown'), /retirado/);
 });
 test('diagnostic startup never verifies SMTP or runs scheduler; blocks implicit-write GET', ()=>{
   const middleware=[]; const effects=[];

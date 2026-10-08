@@ -8,6 +8,6 @@ export function validateProfile(body:any){
  return data;
 }
 export function validatePreferences(body:any){
- if(!body||typeof body.recibir_notificaciones!=='boolean'||!['diaria','semanal','inmediata'].includes(body.frecuencia_notificaciones)||!['email','sms'].includes(body.tipo_notificacion))throw new ProfileError(400,'Selecciona un estado, una frecuencia y un canal válidos');
+ if(!body||typeof body.recibir_notificaciones!=='boolean'||!['diaria','semanal','inmediata'].includes(body.frecuencia_notificaciones)||body.tipo_notificacion!=='email')throw new ProfileError(400,'Selecciona una frecuencia válida. El único canal disponible es correo electrónico.');
  return {recibir_notificaciones:body.recibir_notificaciones,frecuencia_notificaciones:body.frecuencia_notificaciones,tipo_notificacion:body.tipo_notificacion};
 }

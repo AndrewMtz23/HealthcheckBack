@@ -1,4 +1,5 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
+from api.internal_auth import require_gateway
 import os
 import requests
 from typing import Dict
@@ -14,6 +15,10 @@ import logging
 logger = logging.getLogger(__name__)
 
 chatbot_bp = Blueprint("chatbot_bp", __name__)
+
+@chatbot_bp.before_request
+def authorize_chat():
+    return require_gateway()
 
 # Claves de API
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -83,11 +88,14 @@ def chat_endpoint():
             
         message = data.get("message")
         session_id = data.get("session_id", "default_session")
+        if not isinstance(session_id, str) or not 1 <= len(session_id) <= 128:
+            return jsonify(error='Identificador de conversación inválido'), 400
+        owned_session_id = f'{g.user_id}:{session_id}'
         
         # Ejecutar el agente
         response = conversational_agent_executor.invoke(
             {"messages": [HumanMessage(content=message)]},
-            {"configurable": {"session_id": session_id}}
+            {"configurable": {"session_id": owned_session_id}}
         )
         
         return jsonify({

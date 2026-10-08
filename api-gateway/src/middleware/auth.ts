@@ -1,91 +1,41 @@
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
 import config from '../config';
 
-interface JwtPayload {
-  id: number;
-  email: string;
-  rol: string;
-  iat: number;
-  exp: number;
-}
+interface CurrentUser { id: number; email: string; rol: string; }
+declare global { namespace Express { interface Request { user?: CurrentUser; } } }
 
-declare global {
-  namespace Express {
-    interface Request {
-      user?: JwtPayload;
-    }
-  }
-}
-
-/**
- * Middleware para verificar token JWT
- */
-export const verifyToken = (req: Request, res: Response, next: NextFunction): void => {
-  // Obtener el token del encabezado de autorización
-  const authHeader = req.headers.authorization;
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    res.status(401).json({
-      status: 'error',
-      message: 'Acceso no autorizado. Token no proporcionado.',
-    });
+// Auth owns revocation and reads the current account on every request.
+// Never authorize from the role embedded in a previously issued JWT.
+export const verifyToken = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  const authorization = req.headers.authorization;
+  if (!authorization || !/^Bearer [^\s]+$/i.test(authorization)) {
+    res.status(401).json({status:'error', message:'Se requiere una sesión válida.'});
     return;
   }
-
   try {
-    // Verificar el token
-    const decoded = jwt.verify(token, config.jwtSecret) as JwtPayload;
-    
-    // Adjuntar el usuario decodificado a la solicitud
-    req.user = decoded;
-    
-    next();
-  } catch (error) {
-    if (error instanceof jwt.TokenExpiredError) {
-      res.status(401).json({
-        status: 'error',
-        message: 'Token expirado. Por favor, inicie sesión nuevamente.',
-      });
-    } else {
-      res.status(401).json({
-        status: 'error',
-        message: 'Token inválido. Acceso denegado.',
-      });
+    const base = config.services.auth;
+    const url = base.replace(/\/$/, '').replace(/\/api$/, '') + '/api/auth/profile';
+    const response = await fetch(url, {headers:{Authorization:authorization},
+      signal:AbortSignal.timeout(3000), redirect:'error', cache:'no-store'});
+    if (response.status === 401) {
+      res.status(401).json({status:'error', message:'Tu sesión terminó. Vuelve a iniciar sesión.'});
+      return;
     }
+    if (!response.ok) throw new Error('Auth unavailable');
+    const payload = await response.json() as {data?: {user?: CurrentUser}};
+    const user = payload.data?.user;
+    if (!user || !Number.isSafeInteger(user.id) || user.id <= 0 || !['admin','usuario'].includes(user.rol))
+      throw new Error('Invalid Auth response');
+    req.user = {id:user.id, email:user.email, rol:user.rol};
+    next();
+  } catch {
+    res.status(503).json({status:'error', message:'No se pudo validar la sesión. Intenta de nuevo.'});
   }
 };
 
-/**
- * Middleware para verificar roles
- * @param roles Array de roles permitidos
- */
-export const checkRoles = (roles: string[]) => {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    // Verificar que existe un usuario (token ya verificado)
-    if (!req.user) {
-      res.status(401).json({
-        status: 'error',
-        message: 'Acceso no autorizado. Token no verificado.',
-      });
-      return;
-    }
-
-    // Verificar que el rol del usuario está entre los permitidos
-    if (!roles.includes(req.user.rol)) {
-      res.status(403).json({
-        status: 'error',
-        message: 'Acceso prohibido. No tiene los permisos necesarios.',
-      });
-      return;
-    }
-
-    next();
-  };
+export const checkRoles = (roles: string[]) => (req: Request, res: Response, next: NextFunction): void => {
+  if (!req.user) { res.status(401).json({status:'error', message:'Se requiere una sesión válida.'}); return; }
+  if (!roles.includes(req.user.rol)) { res.status(403).json({status:'error', message:'No tienes permisos para esta operación.'}); return; }
+  next();
 };
-
-export default {
-  verifyToken,
-  checkRoles,
-};
+export default {verifyToken, checkRoles};

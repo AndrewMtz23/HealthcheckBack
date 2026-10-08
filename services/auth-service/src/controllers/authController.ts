@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import User from '../models/User';
-import { generateToken } from '../utils/jwt';
+import sequelize from '../config/db';
+import { generateToken, extractTokenFromRequest, verifyToken } from '../utils/jwt';
+import { revokeSession } from '../utils/sessions';
 import env from '../config/env';
 import { Op } from 'sequelize';
 import {ProfileError,validateProfile} from '../profile/validation';
@@ -63,54 +65,30 @@ export const register = async (req: Request, res: Response): Promise<void> => {
  * Iniciar sesión con correo y contraseña
  */
 export const login = async (req: Request, res: Response): Promise<void> => {
+  let issuedToken: string | undefined;
   try {
     const { email, contrasena } = req.body;
-
-    // Buscar usuario por email
-    const user = await User.findOne({
-      where: { email },
+    const session = await sequelize.transaction(async transaction => {
+      // Serialize issuance with account/password changes. Do not issue a token
+      // from a snapshot read before a concurrent deactivation committed.
+      const user = await User.findOne({where:{email}, transaction, lock:transaction.LOCK.UPDATE});
+      if (!user || !user.activo || !(await user.isValidPassword(contrasena))) return null;
+      user.ultima_conexion = new Date();
+      await user.save({transaction});
+      issuedToken = generateToken(user);
+      return {user:profilePayload(user), token:issuedToken};
     });
-
-    // Verificar si el usuario existe y la contraseña es correcta
-    if (!user || !(await user.isValidPassword(contrasena))) {
-      res.status(401).json({
-        status: 'error',
-        message: 'Credenciales incorrectas',
-      });
+    if (!session) {
+      res.status(401).json({status:'error', message:'Credenciales incorrectas o cuenta inactiva.'});
       return;
     }
-
-    // Verificar si el usuario está activo
-    if (!user.activo) {
-      res.status(401).json({
-        status: 'error',
-        message: 'Este usuario ha sido desactivado',
-      });
-      return;
-    }
-
-    // Actualizar última conexión
-    user.ultima_conexion = new Date();
-    await user.save();
-
-    // Generar token JWT
-    const token = generateToken(user);
-
-    // Responder con el usuario y token
-    res.status(200).json({
-      status: 'success',
-      message: 'Inicio de sesión exitoso',
-      data: {
-        user: profilePayload(user),
-        token,
-      },
-    });
+    res.status(200).json({status:'success', message:'Inicio de sesión exitoso', data:session});
   } catch (error) {
+    // A failed commit must not leave a usable registered session.
+    const payload = issuedToken && verifyToken(issuedToken);
+    if (payload) revokeSession(payload.jti);
     console.error('Error al iniciar sesión:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error al iniciar sesión',
-    });
+    res.status(500).json({status:'error', message:'Error al iniciar sesión'});
   }
 };
 
@@ -126,12 +104,18 @@ export const googleCallback = (req: Request, res: Response): void => {
     }
 
     const user = req.user as User;
+    if (!user.activo) {
+      res.redirect(`${env.frontendUrl}/login?error=cuenta-inactiva`);
+      return;
+    }
     
     // Generar token JWT
     const token = generateToken(user);
 
     // Redireccionar al frontend con el token
-    res.redirect(`${env.frontendUrl}/login/callback?token=${token}`);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.redirect(`${env.frontendUrl}/login/callback#token=${encodeURIComponent(token)}`);
   } catch (error) {
     console.error('Error en callback de Google:', error);
     res.redirect(`${env.frontendUrl}/login?error=error-interno`);
@@ -187,17 +171,13 @@ export const updateProfile = async (req: Request, res: Response): Promise<void> 
 };
 
 /**
- * Cerrar sesión (solo para propósitos de registro en el backend)
+ * Revocar solo esta sesión; otros dispositivos siguen conectados.
  */
 export const logout = async (req: Request, res: Response): Promise<void> => {
   try {
-    // No necesitamos invalidar JWT ya que son stateless
-    // Pero podemos actualizar la última conexión del usuario
-    if (req.user) {
-      const user = req.user as User;
-      user.ultima_conexion = new Date();
-      await user.save();
-    }
+    const token = extractTokenFromRequest(req);
+    const payload = token && verifyToken(token);
+    if (payload) revokeSession(payload.jti);
 
     res.status(200).json({
       status: 'success',

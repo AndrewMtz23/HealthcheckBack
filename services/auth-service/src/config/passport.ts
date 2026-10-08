@@ -1,19 +1,22 @@
 import passport from 'passport';
-import { Strategy as JwtStrategy, ExtractJwt } from 'passport-jwt';
+import { Strategy as JwtStrategy, ExtractJwt, StrategyOptionsWithoutRequest } from 'passport-jwt';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import User from '../models/User';
 import env from './env';
+import { validSession } from '../utils/sessions';
 
 // Configuración de la estrategia JWT
-const jwtOptions = {
+const jwtOptions: StrategyOptionsWithoutRequest = {
   jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
   secretOrKey: env.jwtSecret,
+  algorithms: ['HS256'],
 };
 
 // Estrategia JWT
 passport.use(
   new JwtStrategy(jwtOptions, async (payload, done) => {
     try {
+      if (!Number.isSafeInteger(payload.id) || payload.id <= 0 || !Number.isFinite(payload.exp)) return done(null, false);
       // Buscar usuario por ID
       const user = await User.findByPk(payload.id);
       
@@ -22,7 +25,7 @@ passport.use(
       }
       
       // Verificar si el usuario está activo
-      if (!user.activo) {
+      if (!validSession(payload.jti, user)) {
         return done(null, false);
       }
       
@@ -54,6 +57,7 @@ if (env.google.clientId && env.google.clientSecret) {
             user = await User.findOne({ where: { email } });
             
             if (user) {
+              if (!user.activo) return done(null, false);
               // Si el usuario existe pero no tiene google_id, actualizar
               user.google_id = profile.id;
               await user.save();
@@ -71,6 +75,7 @@ if (env.google.clientId && env.google.clientSecret) {
             });
           }
           
+          if (!user.activo) return done(null, false);
           // Actualizar última conexión
           user.ultima_conexion = new Date();
           await user.save();

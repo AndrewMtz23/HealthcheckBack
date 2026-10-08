@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import { Op } from 'sequelize';
+import { Op, literal } from 'sequelize';
+import {parseQuery,AdminError} from '../admin/query';
 import HistorialConsulta from '../models/HistorialConsulta';
 import News from '../models/News';
 import Tema from '../models/Tema';
@@ -25,23 +26,22 @@ export const getUserHistory = async (req: Request, res: Response): Promise<void>
     }
 
     const usuario_id = req.user.id;
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 10;
-    const offset = (page - 1) * limit;
+    const {page,limit,offset,startDate,endDate}=parseQuery({...req.query,limit:req.query.limit||10});
 
     // Filtrar por fecha si se proporciona
-    const startDate = req.query.startDate ? new Date(req.query.startDate as string) : null;
-    const endDate = req.query.endDate ? new Date(req.query.endDate as string) : null;
 
     const dateCondition: any = {};
     if (startDate || endDate) {
       dateCondition.fecha_consulta = {};
-      if (startDate) dateCondition.fecha_consulta[Op.gte] = startDate;
-      if (endDate) dateCondition.fecha_consulta[Op.lte] = endDate;
+      // parseQuery strictly validates calendar dates before SQL interpolation.
+      // Stored timestamps have no timezone: preserve their calendar dates.
+      if (startDate) dateCondition.fecha_consulta[Op.gte] = literal(`'${startDate}'::timestamp`);
+      if (endDate) dateCondition.fecha_consulta[Op.lt] = literal(`'${endDate}'::timestamp + interval '1 day'`);
     }
 
     // Buscar el historial de consultas con detalles de las noticias
     const { count, rows } = await HistorialConsulta.findAndCountAll({
+      distinct: true,
       where: {
         usuario_id,
         ...dateCondition
@@ -65,13 +65,16 @@ export const getUserHistory = async (req: Request, res: Response): Promise<void>
             {
               model: ClasificacionNoticia,
               as: 'clasificaciones',
-              attributes: ['resultado', 'confianza'],
+              attributes: ['resultado', 'confianza', 'fecha_clasificacion'],
+              separate: true,
+              limit: 1,
+              order: [['fecha_clasificacion','DESC'],['id','DESC']],
               required: false
             }
           ]
         }
       ],
-      order: [['fecha_consulta', 'DESC']],
+      order: [['fecha_consulta', 'DESC'],['id','DESC']],
       limit,
       offset
     });
@@ -86,6 +89,7 @@ export const getUserHistory = async (req: Request, res: Response): Promise<void>
       }
     });
   } catch (error) {
+    if(error instanceof AdminError){res.status(error.status).json({status:'error',message:error.message});return;}
     console.error('Error al obtener historial de consultas:', error);
     res.status(500).json({
       status: 'error',

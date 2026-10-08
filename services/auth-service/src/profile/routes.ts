@@ -16,7 +16,6 @@ router.use(authenticate);
 router.get('/preferences',run(async(req,res)=>{res.json({status:'success',data:await preferences(idOf(req))});}));
 router.put('/preferences',run(async(req,res)=>{
  const data=validatePreferences(req.body),id=idOf(req);
- if(data.recibir_notificaciones&&data.tipo_notificacion==='sms'&&!(req.user as any).telefono?.trim())throw new ProfileError(400,'Agrega un teléfono a tu perfil antes de seleccionar SMS');
  await sequelize.transaction(async transaction=>{
   await sequelize.query('SELECT id FROM usuarios WHERE id=:id FOR UPDATE',{replacements:{id},transaction});
   const existing=await sequelize.query('SELECT id FROM preferencias_usuario WHERE usuario_id=:id',{replacements:{id},type:QueryTypes.SELECT,transaction});

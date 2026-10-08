@@ -14,6 +14,7 @@ import os
 import hmac
 import time
 import math
+from api.internal_auth import require_gateway
 
 # Configuración básica de logging
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +22,10 @@ logger = logging.getLogger(__name__)
 
 # Crear el Blueprint
 classify_bp = Blueprint("classify_bp", __name__)
+
+@classify_bp.before_request
+def authorize_classification():
+    return require_gateway(admin=request.endpoint != 'classify_bp.classify')
 
 def analysis_response(saved):
     return {

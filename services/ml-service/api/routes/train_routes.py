@@ -11,11 +11,16 @@ from datetime import datetime
 from database.db import db
 from database.models import ModeloML
 from config import Config
+from api.internal_auth import require_gateway
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 train_bp = Blueprint("train_bp", __name__)
+
+@train_bp.before_request
+def authorize_training():
+    return require_gateway(admin=True)
 
 class FakeNewsDataset(torch.utils.data.Dataset):
     def __init__(self, encodings, labels):

@@ -2,12 +2,15 @@ import jwt from 'jsonwebtoken';
 import env from '../config/env';
 import { Request } from 'express';
 import User from '../models/User';
+import { issueSession } from './sessions';
+import { ExtractJwt } from 'passport-jwt';
 
 // Payload del token JWT
 interface JwtPayload {
   id: number;
   email: string;
   rol: string;
+  jti: string;
 }
 
 /**
@@ -16,14 +19,19 @@ interface JwtPayload {
  * @returns Token JWT generado
  */
 export const generateToken = (user: User): string => {
+  if (!env.jwtSecret || env.jwtSecret === 'default_secret_key') throw new Error('JWT no configurado');
+  const expiresIn = Number.isSafeInteger(env.jwtExpiration) && env.jwtExpiration > 0
+    ? Math.min(env.jwtExpiration, 86400) : 3600;
   const payload: JwtPayload = {
     id: user.id,
     email: user.email,
     rol: user.rol,
+    jti: issueSession(user, expiresIn),
   };
 
   return jwt.sign(payload, env.jwtSecret, {
-    expiresIn: env.jwtExpiration,
+    expiresIn,
+    algorithm: 'HS256',
   });
 };
 
@@ -34,7 +42,7 @@ export const generateToken = (user: User): string => {
  */
 export const verifyToken = (token: string): JwtPayload | null => {
   try {
-    return jwt.verify(token, env.jwtSecret) as JwtPayload;
+    return jwt.verify(token, env.jwtSecret, {algorithms:['HS256']}) as JwtPayload;
   } catch (error) {
     return null;
   }
@@ -46,18 +54,7 @@ export const verifyToken = (token: string): JwtPayload | null => {
  * @returns Token JWT o null si no se encuentra
  */
 export const extractTokenFromRequest = (req: Request): string | null => {
-  if (
-    req.headers.authorization &&
-    req.headers.authorization.startsWith('Bearer ')
-  ) {
-    return req.headers.authorization.split(' ')[1];
-  }
-
-  if (req.cookies && req.cookies.token) {
-    return req.cookies.token;
-  }
-
-  return null;
+  return ExtractJwt.fromAuthHeaderAsBearerToken()(req);
 };
 
 export default {

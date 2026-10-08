@@ -152,7 +152,7 @@ class PreferenceModel {
         `SELECT DISTINCT u.id, u.email, u.telefono, u.nombre, pu.tipo_notificacion, pu.frecuencia_notificaciones
          FROM usuarios u
          JOIN preferencias_usuario pu ON u.id = pu.usuario_id
-         WHERE u.activo = TRUE AND pu.recibir_notificaciones = TRUE`
+         WHERE u.activo = TRUE AND pu.recibir_notificaciones = TRUE AND pu.tipo_notificacion = 'email'`
       );
       
       const users = [];

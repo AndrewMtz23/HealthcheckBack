@@ -118,7 +118,9 @@ class NotificationModel {
          JOIN usuarios u ON n.usuario_id = u.id
          LEFT JOIN noticias no ON n.noticia_id = no.id
          LEFT JOIN temas t ON no.tema_id = t.id
-         WHERE n.enviada = FALSE
+         WHERE n.enviada = FALSE AND n.tipo = 'email' AND u.activo = TRUE
+           AND EXISTS (SELECT 1 FROM preferencias_usuario pu WHERE pu.usuario_id = u.id
+             AND pu.recibir_notificaciones = TRUE AND pu.tipo_notificacion = 'email')
          ORDER BY u.id, n.tipo, n.fecha_creacion ASC`
       );
       

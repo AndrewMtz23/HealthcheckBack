@@ -3,6 +3,7 @@ import { Op, UniqueConstraintError } from 'sequelize';
 import User from '../models/User';
 import sequelize from '../config/db';
 import { authenticate } from '../middleware/auth';
+import { revokeUserSessions } from '../utils/sessions';
 import { AdminError, validateUser, protectAdmin } from './validation';
 const router = Router();
 const attributes = ['id', 'nombre', 'email', 'telefono', 'imagen_url', 'rol', 'activo', 'fecha_registro', 'ultima_conexion'];
@@ -68,6 +69,9 @@ router.patch('/:id', run(async (req, res) => {
             throw new AdminError(404, 'Usuario no encontrado');
         protectAdmin(actor.id, user, data, await User.count({ where: { rol: 'admin', activo: true }, transaction }));
         await user.update(data, { transaction });
+        if (data.activo === false || data.contrasena !== undefined) {
+            transaction.afterCommit(() => { revokeUserSessions(id); });
+        }
     });
     res.json({ status: 'success', data: await User.findByPk(id, { attributes }) });
 }));
