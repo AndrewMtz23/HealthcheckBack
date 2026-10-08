@@ -37,7 +37,7 @@ if __name__ == "__main__":
     if not os.environ.get('WERKZEUG_RUN_MAIN'):
         with app.app_context():
             start_scheduler(app)
-            from core.classify_service import load_model
-            load_model()
+            # Load only on an authorized prediction request. Missing artifacts
+            # produce a controlled 503 instead of preventing service startup.
             
     app.run(host="0.0.0.0", port=5000, debug=os.environ.get('HEALTHCHECK_DIAGNOSTIC') != '1')

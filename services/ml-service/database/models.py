@@ -1,7 +1,7 @@
 from datetime import datetime
-from database.db import db
+from database.db import db, Model
 
-class Fuente(db.Model):
+class Fuente(Model):
     __tablename__ = 'fuentes'
     
     id = db.Column(db.Integer, primary_key=True)
@@ -19,7 +19,7 @@ class Fuente(db.Model):
     noticias = db.relationship('Noticia', backref='fuente', lazy=True)
 
 
-class Noticia(db.Model):
+class Noticia(Model):
     __tablename__ = 'noticias'
     
     id = db.Column(db.Integer, primary_key=True)
@@ -38,7 +38,7 @@ class Noticia(db.Model):
     consultas = db.relationship('HistorialConsulta', backref='noticia', lazy=True, cascade='all, delete-orphan')
 
 
-class ModeloML(db.Model):
+class ModeloML(Model):
     __tablename__ = 'modelos_ml'
     
     id = db.Column(db.Integer, primary_key=True)
@@ -58,7 +58,7 @@ class ModeloML(db.Model):
     clasificaciones = db.relationship('ClasificacionNoticia', backref='modelo', lazy=True)
 
 
-class ClasificacionNoticia(db.Model):
+class ClasificacionNoticia(Model):
     __tablename__ = 'clasificacion_noticias'
     
     id = db.Column(db.Integer, primary_key=True)
@@ -70,7 +70,7 @@ class ClasificacionNoticia(db.Model):
     fecha_clasificacion = db.Column(db.DateTime, default=datetime.utcnow)
 
 
-class Usuario(db.Model):
+class Usuario(Model):
     __tablename__ = 'usuarios'
     
     id = db.Column(db.Integer, primary_key=True)
@@ -87,7 +87,7 @@ class Usuario(db.Model):
     consultas = db.relationship('HistorialConsulta', backref='usuario', lazy=True)
 
 
-class HistorialConsulta(db.Model):
+class HistorialConsulta(Model):
     __tablename__ = 'historial_consultas'
     
     id = db.Column(db.Integer, primary_key=True)
@@ -96,7 +96,7 @@ class HistorialConsulta(db.Model):
     fecha_consulta = db.Column(db.DateTime, default=datetime.utcnow)
 
 
-class Tema(db.Model):
+class Tema(Model):
     __tablename__ = 'temas'
     
     id = db.Column(db.Integer, primary_key=True)
@@ -108,14 +108,14 @@ class Tema(db.Model):
     # Relaciones
     noticias = db.relationship('Noticia', backref='tema', lazy=True)
 
-class Keyword(db.Model):
+class Keyword(Model):
     __tablename__ = 'keywords'
     
     id = db.Column(db.Integer, primary_key=True)
     palabra = db.Column(db.String, unique=True, nullable=False)
     relevancia = db.Column(db.Numeric(5, 2), default=1.0)
 
-class NoticiaKeyword(db.Model):
+class NoticiaKeyword(Model):
     __tablename__ = 'noticias_keywords'
     
     id = db.Column(db.Integer, primary_key=True)

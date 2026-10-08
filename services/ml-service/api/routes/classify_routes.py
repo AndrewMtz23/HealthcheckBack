@@ -1,14 +1,19 @@
 from flask import Blueprint, request, jsonify, Response
-from core.classify_service import predict_news
-from utils.article_extractor import extract_news_data
-from utils.db_utils import get_or_create_source, save_news, get_active_model, save_classification, save_consultation, classify_topic, extract_keywords, save_news_keywords
-from scrapers.google_news import GoogleNewsScraper
-from scrapers.twitter_scraper import TwitterScraper
+from core.classify_service import predict_news, prepare_model, ModelUnavailable
+from utils.article_extractor import extract_news_data, extract_news_data_safe
+from utils.db_utils import (
+    get_or_create_source, save_news, get_active_model, save_classification,
+    save_consultation, classify_topic, extract_keywords, save_news_keywords,
+    save_complete_analysis, get_cached_analysis
+)
 import logging
 from datetime import datetime
 import csv
 import io
 import os
+import hmac
+import time
+import math
 
 # Configuración básica de logging
 logging.basicConfig(level=logging.INFO)
@@ -17,88 +22,96 @@ logger = logging.getLogger(__name__)
 # Crear el Blueprint
 classify_bp = Blueprint("classify_bp", __name__)
 
+def analysis_response(saved):
+    return {
+        "Consulta ID": saved["consulta_id"], "Noticia ID": saved["noticia_id"],
+        "Clasificación ID": saved["clasificacion_id"], "Modelo ID": saved["modelo_id"],
+        "Fuente": saved["url"] or "Texto ingresado directamente",
+        "Título": saved["titulo"], "Texto Completo": saved["contenido"],
+        "Autor": "No disponible" if saved["url"] else "Usuario",
+        "Fecha de Publicación": saved["fecha_publicacion"],
+        "Clasificación": saved["resultado"], "Confianza": saved["confianza"],
+        "Explicación": saved["explicacion"], "Tema": saved["tema"],
+        "Palabras Clave": saved["keywords"], "Reutilizado": saved["reutilizado"],
+    }
+
+
 @classify_bp.route("/predict", methods=["POST"])
 def classify():
-    """Recibe una noticia (texto o URL), la guarda en la base de datos y la clasifica."""
-    data = request.json
-
-    if not data:
-        return jsonify({"error": "Por favor, envía un JSON con 'text' o 'url'"}), 400
-
+    expected = os.environ.get("ML_GATEWAY_SECRET", "")
+    if len(expected) < 32:
+        return jsonify(error="El servicio de análisis no está configurado.", code="SERVICE_UNAVAILABLE"), 503
+    supplied = request.headers.get("X-Gateway-Secret", "")
+    if not hmac.compare_digest(supplied.encode(), expected.encode()):
+        return jsonify(error="Acceso no autorizado.", code="UNAUTHORIZED_DIRECT_IDENTITY"), 403
     try:
-        usuario_id = data.get("usuario_id", None)  # Usuario opcional
-        extracted_data = {}
+        usuario_id = int(request.headers.get("X-User-Id", ""))
+        if usuario_id <= 0 or usuario_id > 2147483647:
+            raise ValueError()
+    except (TypeError, ValueError):
+        return jsonify(error="Se requiere una identidad autenticada válida.", code="UNAUTHORIZED_DIRECT_IDENTITY"), 403
 
-        if "url" in data:
-            extracted_data = extract_news_data(data["url"])
-            if not extracted_data:
-                return jsonify({"error": "No se pudo extraer contenido de la URL."}), 400
-
-            # Guardar fuente
-            fuente_id = get_or_create_source(data["url"])
-            text = extracted_data["Texto Completo"]
-
-        elif "text" in data:
-            text = data["text"]
-            extracted_data = {
-                "Título": "No disponible",
-                "Texto Completo": text,
-                "Autor": "Desconocido",
-                "Fecha de Publicación": None
-            }
-            fuente_id = None
-        else:
-            return jsonify({"error": "El JSON debe contener 'text' o 'url'."}), 400
-
-        # PASO 1: Clasificar el Tema dinámicamente
-        tema_nombre, tema_id = classify_topic(text)
-        
-        # PASO 2: Guardar Noticia con su Tema
-        noticia_id = save_news(
-            extracted_data["Título"],
-            extracted_data["Texto Completo"],
-            data.get("url"),
-            extracted_data["Fecha de Publicación"],
-            fuente_id,
-            tema_id
-        )
-        
-        # PASO 3: Extraer y Guardar Keywords
-        keywords = extract_keywords(text)
-        save_news_keywords(noticia_id, keywords)
-
-        # PASO 4: Clasificar Noticia como verdadera o falsa
-        resultado, confianza, explicacion = predict_news(text)
-
-        # Obtener el modelo activo
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or ("url" in data) == ("text" in data):
+        return jsonify(error="Envía exactamente uno de los campos text o url.", code="INVALID_INPUT"), 400
+    url = data.get("url")
+    text = data.get("text")
+    if url is not None:
+        if not isinstance(url, str) or not url.strip() or len(url) > 2048:
+            return jsonify(error="La URL debe contener entre 1 y 2048 caracteres.", code="INVALID_URL"), 400
+        url = url.strip()
+    elif not isinstance(text, str) or not 10 <= len(text.strip()) <= 50000:
+        return jsonify(error="El texto debe contener entre 10 y 50,000 caracteres.", code="INVALID_TEXT"), 400
+    else:
+        text = text.strip()
+    try:
+        # Shared deadline is generated by the authenticated gateway, never the client.
+        remaining = min(25.0, float(request.headers.get("X-Request-Deadline", time.time() + 25)) - time.time())
+        if not math.isfinite(remaining):
+            raise ValueError()
+    except (TypeError, ValueError):
+        return jsonify(error="Plazo de solicitud inválido.", code="INVALID_INPUT"), 400
+    deadline = time.monotonic() + remaining
+    def check_deadline():
+        if time.monotonic() >= deadline:
+            raise TimeoutError("Analysis deadline exceeded")
+    try:
+        check_deadline()
         modelo_id = get_active_model()
-        if not modelo_id:
-            return jsonify({"error": "No hay un modelo activo disponible para la clasificación."}), 500
-
-        # Guardar clasificación
-        clasificacion_id = save_classification(noticia_id, modelo_id, resultado, confianza, explicacion)
-
-        # PASO 5: Guardar en historial de consultas
-        consulta_id = None
-        if usuario_id:
-            consulta_id = save_consultation(usuario_id, noticia_id)
-
-        return jsonify({
-            "Consulta ID": consulta_id,
-            "Noticia ID": noticia_id,
-            "Clasificación ID": clasificacion_id,
-            "Fuente": data.get("url", "Texto ingresado directamente"),
-            **extracted_data,
-            "Clasificación": resultado,
-            "Confianza": confianza,
-            "Explicación": explicacion,
-            "Tema": tema_nombre,
-            "Palabras Clave": keywords
-        }), 200
-    
-    except Exception as e:
-        logger.error(f"Error durante la clasificación: {str(e)}")
-        return jsonify({"error": f"Error durante el procesamiento: {str(e)}"}), 500
+        if modelo_id is None:
+            raise ModelUnavailable("No hay un modelo activo configurado.")
+        cached = get_cached_analysis(url, text, modelo_id, usuario_id, check_deadline=check_deadline)
+        if cached:
+            return jsonify(analysis_response(cached)), 200
+        snapshot = prepare_model(modelo_id)
+        check_deadline()
+        extracted = {"Título": "Análisis de texto directo", "Fecha de Publicación": None}
+        if url:
+            extracted, error = extract_news_data_safe(url)
+            check_deadline()
+            if error or extracted is None:
+                return jsonify(error="No se pudo extraer la noticia de esa URL.", code="EXTRACTION_FAILED"), 400
+            text = (extracted.get("Texto Completo") or "").strip()
+            if not 10 <= len(text) <= 50000:
+                return jsonify(error="El contenido debe contener entre 10 y 50,000 caracteres.", code="INVALID_TEXT"), 400
+        resultado, confianza, explicacion = predict_news(text, loaded_model=snapshot)
+        check_deadline()
+        tema_nombre, tema_id = classify_topic(text)
+        keywords = extract_keywords(text)
+        saved = save_complete_analysis(
+            titulo=extracted.get("Título") or "No disponible", contenido=text, url=url,
+            fecha_publicacion=extracted.get("Fecha de Publicación"), fuente_url=url,
+            tema_nombre=tema_nombre, tema_id=tema_id, keywords=keywords, modelo_id=snapshot.id,
+            resultado=resultado, confianza=confianza, explicacion=explicacion,
+            usuario_id=usuario_id, check_deadline=check_deadline)
+        return jsonify(analysis_response(saved)), 200
+    except ModelUnavailable:
+        return jsonify(error="El modelo de análisis no está disponible en este momento.", code="MODEL_UNAVAILABLE"), 503
+    except TimeoutError:
+        return jsonify(error="El análisis tardó demasiado. Puedes reintentarlo.", code="ANALYSIS_TIMEOUT"), 504
+    except Exception:
+        logger.exception("Error durante el análisis")
+        return jsonify(error="No se pudo completar el análisis. Intenta nuevamente.", code="INTERNAL_ERROR"), 500
 
 @classify_bp.route("/scrape/google", methods=["POST"])
 def scrape_google_news():
@@ -112,6 +125,7 @@ def scrape_google_news():
         save_to_db = data.get("save_to_db", False)  # Por defecto no guardar en BD
         
         # Iniciar el scraper
+        from scrapers.google_news import GoogleNewsScraper
         scraper = GoogleNewsScraper()
         
         # Lista para resultados
@@ -182,6 +196,7 @@ def scrape_twitter():
         save_to_db = data.get("save_to_db", False)  # Por defecto no guardar en BD
         
         # Iniciar el scraper
+        from scrapers.twitter_scraper import TwitterScraper
         scraper = TwitterScraper()
         
         # Si se debe guardar en BD, usar el método original

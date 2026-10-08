@@ -1,6 +1,11 @@
 from database.db import db
 from database.models import Fuente, Noticia, ModeloML, ClasificacionNoticia, HistorialConsulta, Tema, Keyword, NoticiaKeyword
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import text as sql_text
+from contextlib import contextmanager, nullcontext
+from threading import RLock
+from typing import cast
+from scipy.sparse import csr_matrix
 from datetime import datetime
 from urllib.parse import urlparse
 import nltk
@@ -15,14 +20,8 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Descargar recursos de NLTK (debes ejecutar esto una vez)
-nltk.download("punkt")
-nltk.download("stopwords")
-nltk.download("wordnet")
-
-# Configurar el lematizador y las stopwords en español e inglés
+# Los recursos NLP se provisionan explícitamente; importar no descarga archivos.
 lemmatizer = WordNetLemmatizer()
-stop_words = set(stopwords.words("spanish") + stopwords.words("english"))
 
 def get_or_create_source(url):
     """Verifica si la fuente existe en la BD; si no, la crea usando SQLAlchemy."""
@@ -108,7 +107,9 @@ def classify_topic(text):
 
 def extract_keywords(text, num_keywords=5):
     """Extrae palabras clave relevantes de un texto usando TF-IDF"""
+    words = []
     try:
+        stop_words = set(stopwords.words("spanish") + stopwords.words("english"))
         # Tokenizar el texto y eliminar stop words y lematizar
         words = word_tokenize(text.lower())
         words = [lemmatizer.lemmatize(word) for word in words if word.isalpha() and word not in stop_words]
@@ -118,7 +119,7 @@ def extract_keywords(text, num_keywords=5):
 
         # Aplicar TF-IDF para obtener la relevancia de las palabras
         vectorizer = TfidfVectorizer()
-        tfidf_matrix = vectorizer.fit_transform([' '.join(words)])
+        tfidf_matrix = cast(csr_matrix, vectorizer.fit_transform([' '.join(words)]))
 
         # Obtener los índices de las palabras más relevantes
         feature_names = vectorizer.get_feature_names_out()
@@ -219,7 +220,7 @@ def save_news(titulo, contenido, url, fecha_publicacion, fuente_id, tema_id=None
 def get_active_model():
     """Obtiene el ID del modelo activo usando SQLAlchemy."""
     try:
-        modelo = ModeloML.query.filter_by(activo=True).order_by(ModeloML.fecha_entrenamiento.desc()).first()
+        modelo = ModeloML.query.filter_by(activo=True).order_by(ModeloML.fecha_entrenamiento.desc().nullslast(), ModeloML.id.desc()).first()
         return modelo.id if modelo else None
     except SQLAlchemyError as e:
         logger.error(f"Error al obtener modelo activo: {str(e)}")
@@ -240,8 +241,8 @@ def save_classification(noticia_id, modelo_id, resultado, confianza, explicacion
         
         # Obtener la noticia y su fuente
         noticia = Noticia.query.get(noticia_id)
-        if noticia and noticia.fuente_id:
-            fuente = Fuente.query.get(noticia.fuente_id)
+        fuente = db.session.get(Fuente, noticia.fuente_id) if noticia and noticia.fuente_id else None
+        if fuente is not None:
             
             # Actualizar contadores según el resultado
             if resultado == 'verdadera':
@@ -283,3 +284,130 @@ def save_consultation(usuario_id, noticia_id):
         db.session.rollback()
         logger.error(f"Error al guardar consulta: {str(e)}")
         raise
+
+# Serializes this analysis writer across PostgreSQL workers without schema changes.
+# Other writers (editorial/scrapers) do not participate in this lock.
+_ANALYSIS_LOCK_ID = 721940001
+_sqlite_analysis_lock = RLock()
+
+
+@contextmanager
+def analysis_transaction():
+    """One commit/rollback, including cache history; bounded PostgreSQL lock wait."""
+    with _sqlite_analysis_lock if db.engine.dialect.name == 'sqlite' else nullcontext():
+        try:
+            if db.engine.dialect.name == "postgresql":
+                db.session.execute(sql_text("SET LOCAL lock_timeout = '5s'"))
+                db.session.execute(sql_text("SELECT pg_advisory_xact_lock(:key)"), {"key": _ANALYSIS_LOCK_ID})
+            yield
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            raise
+
+
+def _find_analysis(url, contenido, modelo_id):
+    query = db.session.query(Noticia, ClasificacionNoticia).join(
+        ClasificacionNoticia, ClasificacionNoticia.noticia_id == Noticia.id
+    ).filter(ClasificacionNoticia.modelo_id == modelo_id)
+    if url:
+        query = query.filter(Noticia.url == url)
+    else:
+        query = query.filter(Noticia.url.is_(None), Noticia.contenido == contenido)
+    return query.order_by(ClasificacionNoticia.fecha_clasificacion.desc(), ClasificacionNoticia.id.desc()).first()
+
+
+def _analysis_result(noticia, clasificacion, usuario_id, reutilizado):
+    # History represents a user's saved analysis, not an access-event counter.
+    consulta = HistorialConsulta.query.filter_by(usuario_id=usuario_id, noticia_id=noticia.id).first()
+    if consulta is None:
+        consulta = HistorialConsulta(usuario_id=usuario_id, noticia_id=noticia.id, fecha_consulta=datetime.utcnow())
+        db.session.add(consulta)
+        db.session.flush()
+    tema = db.session.get(Tema, noticia.tema_id) if noticia.tema_id else None
+    keywords = db.session.query(Keyword.palabra).join(
+        NoticiaKeyword, NoticiaKeyword.keyword_id == Keyword.id
+    ).filter(NoticiaKeyword.noticia_id == noticia.id).order_by(Keyword.palabra).all()
+    # Materialize everything before commit (no expired ORM reads after success).
+    return {
+        "noticia_id": noticia.id, "clasificacion_id": clasificacion.id,
+        "consulta_id": consulta.id, "modelo_id": clasificacion.modelo_id,
+        "titulo": noticia.titulo, "contenido": noticia.contenido, "url": noticia.url,
+        "fecha_publicacion": noticia.fecha_publicacion.strftime("%Y-%m-%d") if noticia.fecha_publicacion else None,
+        "tema": tema.nombre if tema else "Sin clasificar",
+        "keywords": [row[0] for row in keywords],
+        "resultado": clasificacion.resultado,
+        "confianza": float(clasificacion.confianza) if clasificacion.confianza is not None else None,
+        "explicacion": clasificacion.explicacion, "reutilizado": reutilizado,
+    }
+
+
+def get_cached_analysis(url, contenido, modelo_id, usuario_id, check_deadline=None):
+    with analysis_transaction():
+        if check_deadline:
+            check_deadline()
+        found = _find_analysis(url, contenido, modelo_id)
+        result = _analysis_result(found[0], found[1], usuario_id, True) if found else None
+        if check_deadline:
+            check_deadline()
+        return result
+
+
+def save_complete_analysis(titulo, contenido, url, fecha_publicacion, fuente_url,
+                           tema_nombre, tema_id, keywords, modelo_id, resultado,
+                           confianza, explicacion, usuario_id=None, check_deadline=None):
+    """Persist a complete version for URL/text + model, atomically and idempotently."""
+    if not usuario_id or not modelo_id:
+        raise ValueError("Authenticated user and model are required")
+    with analysis_transaction():
+        if check_deadline:
+            check_deadline()
+        found = _find_analysis(url, contenido, modelo_id)
+        if found:
+            result = _analysis_result(found[0], found[1], usuario_id, True)
+        else:
+            fuente = None
+            if fuente_url:
+                parsed = urlparse(fuente_url)
+                base_url = f"{parsed.scheme}://{parsed.netloc}"
+                fuente = Fuente.query.filter_by(url=base_url).first()
+                if fuente is None:
+                    fuente = Fuente(nombre=parsed.netloc.removeprefix('www.'), url=base_url,
+                                    confiabilidad=0.5, noticias_verdaderas=0, noticias_falsas=0, verificada=False)
+                    db.session.add(fuente)
+                    db.session.flush()
+            fecha = fecha_publicacion
+            if isinstance(fecha, str):
+                try:
+                    fecha = datetime.strptime(fecha, '%Y-%m-%d')
+                except ValueError:
+                    fecha = None
+            noticia = Noticia(titulo=titulo, contenido=contenido, url=url,
+                              fecha_publicacion=fecha, fuente_id=fuente.id if fuente else None,
+                              tema_id=tema_id, fecha_analisis=datetime.utcnow())
+            db.session.add(noticia)
+            db.session.flush()
+            for word in sorted({w.strip().lower() for w in (keywords or []) if isinstance(w, str) and w.strip()}):
+                keyword = Keyword.query.filter_by(palabra=word).first()
+                if keyword is None:
+                    keyword = Keyword(palabra=word, relevancia=1.0)
+                    db.session.add(keyword)
+                    db.session.flush()
+                else:
+                    keyword.relevancia = float(keyword.relevancia or 0) + 1.0
+                db.session.add(NoticiaKeyword(noticia_id=noticia.id, keyword_id=keyword.id))
+            clasificacion = ClasificacionNoticia(noticia_id=noticia.id, modelo_id=modelo_id,
+                resultado=resultado, confianza=confianza, explicacion=explicacion)
+            db.session.add(clasificacion)
+            db.session.flush()
+            if fuente:
+                fuente.noticias_verdaderas = (fuente.noticias_verdaderas or 0) + int(resultado == 'verdadera')
+                fuente.noticias_falsas = (fuente.noticias_falsas or 0) + int(resultado == 'falsa')
+                total = fuente.noticias_verdaderas + fuente.noticias_falsas
+                if total:
+                    fuente.confiabilidad = round(fuente.noticias_verdaderas / total, 2)
+                fuente.updated_at = datetime.utcnow()
+            result = _analysis_result(noticia, clasificacion, usuario_id, False)
+        if check_deadline:
+            check_deadline()
+        return result
