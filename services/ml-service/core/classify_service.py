@@ -1,94 +1,75 @@
+from dataclasses import dataclass
+from pathlib import Path
+from threading import RLock
+from typing import Any
 import torch
 import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
-import os
-from config import Config
 from database.models import ModeloML
-import logging
+from utils.db_utils import get_active_model
 
-logger = logging.getLogger(__name__)
-
-# Variables globales para mantener el modelo cargado
-tokenizer = None
-model = None
-model_id = None
+MODEL_ROOT = Path(__file__).resolve().parents[1] / "models"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+_load_lock = RLock()
 
-def load_model():
-    """Carga el modelo activo desde la base de datos."""
-    global tokenizer, model, model_id
-    
-    try:
-        # Obtener el modelo activo de la base de datos
-        modelo_activo = ModeloML.query.filter_by(activo=True).first()
-        
-        # Si no hay modelo activo, intentar usar el modelo predeterminado
-        if not modelo_activo:
-            default_model_path = Config.MODEL_PATH
-            logger.warning(f"No hay modelo activo en la BD. Usando modelo predeterminado: {default_model_path}")
-            tokenizer = AutoTokenizer.from_pretrained(default_model_path)
-            model = AutoModelForSequenceClassification.from_pretrained(default_model_path, from_tf=False, use_safetensors=False)
-            model_id = None
-            return
-            
-        # Si el modelo ya está cargado, no hacer nada
-        if model_id == modelo_activo.id:
-            return
-            
-        # Construir la ruta al modelo
-        model_path = os.path.join('models', f"model_{modelo_activo.version}")
-        
-        # Si la ruta no existe, intentar usar el modelo predeterminado
-        if not os.path.exists(model_path):
-            logger.warning(f"Ruta del modelo {model_path} no encontrada. Usando modelo predeterminado.")
-            model_path = Config.MODEL_PATH
-            
-        logger.info(f"Cargando modelo desde: {model_path}")
-        
-        # Cargar el modelo
-        tokenizer = AutoTokenizer.from_pretrained(model_path)
-        model = AutoModelForSequenceClassification.from_pretrained(model_path, from_tf=False, use_safetensors=False)
-        model.to(device)
-        model_id = modelo_activo.id
-        
-        logger.info(f"Modelo {model_id} cargado correctamente")
-        
-    except Exception as e:
-        logger.error(f"Error al cargar el modelo: {str(e)}")
-        # En caso de error, intentar cargar el modelo predeterminado
+
+class ModelUnavailable(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class LoadedModel:
+    id: int
+    version: str
+    tokenizer: Any
+    model: Any
+
+
+_loaded: LoadedModel | None = None
+
+
+def prepare_model(expected_id: int) -> LoadedModel:
+    """Return an immutable request snapshot; never substitute a different artifact."""
+    global _loaded
+    with _load_lock:
+        selected = ModeloML.query.filter_by(id=expected_id, activo=True).first()
+        if selected is None:
+            raise ModelUnavailable("El modelo seleccionado ya no está disponible.")
+        if _loaded is not None and (_loaded.id, _loaded.version) == (selected.id, selected.version):
+            return _loaded
+        path = (MODEL_ROOT / f"model_{selected.version}").resolve()
+        if path.parent != MODEL_ROOT.resolve() or not path.is_dir():
+            raise ModelUnavailable("No se encontraron los archivos del modelo activo.")
         try:
-            default_model_path = Config.MODEL_PATH
-            tokenizer = AutoTokenizer.from_pretrained(default_model_path)
-            model = AutoModelForSequenceClassification.from_pretrained(default_model_path, from_tf=False, use_safetensors=False)
+            tokenizer = AutoTokenizer.from_pretrained(str(path), local_files_only=True)
+            model = AutoModelForSequenceClassification.from_pretrained(
+                str(path), from_tf=False, local_files_only=True)
             model.to(device)
-            model_id = None
-            logger.warning(f"Se ha cargado el modelo predeterminado debido a un error")
-        except Exception as inner_e:
-            logger.error(f"Error crítico al cargar modelo predeterminado: {str(inner_e)}")
-            raise
+            model.eval()
+        except Exception as exc:
+            raise ModelUnavailable("No se pudieron cargar los archivos del modelo activo.") from exc
+        snapshot = LoadedModel(selected.id, selected.version, tokenizer, model)
+        _loaded = snapshot
+        return snapshot
 
-def predict_news(text):
-    """Clasifica una noticia y devuelve su resultado."""
-    global tokenizer, model, device
-    
-    # Asegurar que el modelo está cargado
-    if model is None or tokenizer is None:
-        load_model()
-        
-    inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=512)
+
+def load_model() -> LoadedModel:
+    active_id = get_active_model()
+    if active_id is None:
+        raise ModelUnavailable("No hay un modelo activo configurado.")
+    return prepare_model(active_id)
+
+
+def predict_news(text, loaded_model: LoadedModel | None = None):
+    """The caller persists the ID of this exact snapshot, even after activation changes."""
+    snapshot = loaded_model if loaded_model is not None else load_model()
+    inputs = snapshot.tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=512)
     inputs = {key: val.to(device) for key, val in inputs.items()}
-
-    model.eval()
     with torch.no_grad():
-        outputs = model(**inputs)
-
+        outputs = snapshot.model(**inputs)
     probs = F.softmax(outputs.logits, dim=-1)
-    confidence, predicted_class = torch.max(probs, dim=1)
-
-    verdad_prob = probs[0, 0].item()
-    confiabilidad = round(verdad_prob * 100, 2)
-
-    labels = ["verdadera", "falsa"]
-    return labels[predicted_class.item()], confiabilidad, \
-           "La noticia parece confiable." if labels[predicted_class.item()] == "verdadera" else \
-           "La noticia muestra patrones de desinformación."
+    _, predicted_class = torch.max(probs, dim=1)
+    reliability = round(probs[0, 0].item() * 100, 2)
+    label = ["verdadera", "falsa"][int(predicted_class.item())]
+    explanation = "La noticia parece confiable." if label == "verdadera" else "La noticia muestra patrones de desinformación."
+    return label, reliability, explanation
