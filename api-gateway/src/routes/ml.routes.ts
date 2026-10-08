@@ -1,5 +1,5 @@
 // Actualización de ml.routes.ts
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { verifyToken } from '../middleware/auth';
 import { createRateLimiter } from '../middleware/rateLimit';
 import proxy from './proxy';
@@ -29,11 +29,89 @@ const scrapeRateLimiter = createRateLimiter({
   max: 5 // 5 peticiones cada 2 minutos
 });
 
+/**
+ * Middleware para validar límites de entrada y asegurar que el usuario_id
+ * provenga exclusivamente de la sesión JWT autenticada (evitando suplantaciones).
+ */
+export const validateAndSanitizeClassifyRequest = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
+  if (!req.user || !Number.isInteger(req.user.id) || req.user.id <= 0) {
+    res.status(401).json({ status: 'error', message: 'Se requiere una sesión válida.' });
+    return;
+  }
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+    res.status(400).json({
+      status: 'error',
+      message: 'Cuerpo de la petición inválido. Se requiere un objeto JSON.',
+    });
+    return;
+  }
+
+  const { text, url } = req.body;
+
+  if (text !== undefined && url !== undefined) {
+    res.status(400).json({status: 'error', message: 'Envía solo text o url.'});
+    return;
+  }
+
+  if (!text && !url) {
+    res.status(400).json({
+      status: 'error',
+      message: 'Debe proporcionar al menos "text" o "url" para el análisis.',
+    });
+    return;
+  }
+
+  if (text !== undefined) {
+    if (typeof text !== 'string' || text.trim().length < 10) {
+      res.status(400).json({
+        status: 'error',
+        message: 'El texto debe contener al menos 10 caracteres para poder ser analizado.',
+      });
+      return;
+    }
+    if (text.length > 50000) {
+      res.status(400).json({
+        status: 'error',
+        message: 'El texto excede el límite máximo permitido de 50,000 caracteres.',
+      });
+      return;
+    }
+  }
+
+  if (url !== undefined) {
+    if (typeof url !== 'string' || !/^https?:\/\//i.test(url.trim())) {
+      res.status(400).json({
+        status: 'error',
+        message: 'La URL debe comenzar con http:// o https://.',
+      });
+      return;
+    }
+    if (url.trim().length > 2048) {
+      res.status(400).json({
+        status: 'error',
+        message: 'La URL excede el límite máximo de 2048 caracteres.',
+      });
+      return;
+    }
+  }
+
+  // Garantizar aislamiento de identidad: si el cliente suministró un usuario_id,
+  // se sobrescribe obligatoriamente con el id de la sesión validada req.user.
+  req.body.usuario_id = req.user.id;
+
+  next();
+};
+
 // Rutas de classify
 router.post(
   '/classify/predict',
   verifyToken,
   defaultRateLimiter,
+  validateAndSanitizeClassifyRequest,
   proxy.createServiceProxy('ml', config.services.ml)
 );
 
