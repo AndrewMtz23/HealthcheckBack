@@ -40,6 +40,13 @@ const morganProd = morgan(
 
 // Middleware para registrar solicitudes HTTP
 export const httpLogger = (req: Request, res: Response, next: NextFunction): void => {
+  if (req.path === '/api/auth' || req.path.startsWith('/api/auth/')) {
+    // OAuth query strings contain temporary credentials. Never send them,
+    // referers, cookies, or password bodies to the request logger.
+    const method = req.method, path = req.path;
+    res.once('finish', () => logger.info(`${method} ${path} ${res.statusCode}`));
+    next(); return;
+  }
   if (config.nodeEnv === 'production') {
     morganProd(req, res, next);
   } else {

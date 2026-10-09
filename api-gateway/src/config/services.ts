@@ -21,6 +21,9 @@ const services: ServiceDefinition[] = [
       // Rutas públicas que no requieren autenticación
       { path: '/register', auth: false },
       { path: '/login', auth: false },
+      { path: '/password/forgot', auth: false },
+      { path: '/password/reset', auth: false },
+      { path: '/password/change', auth: true },
       { path: '/google', auth: false },
       { path: '/google/callback', auth: false },
       { path: '/google/failure', auth: false },

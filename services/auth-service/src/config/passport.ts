@@ -4,6 +4,8 @@ import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import User from '../models/User';
 import env from './env';
 import { validSession } from '../utils/sessions';
+import { GoogleStateStore } from '../account/googleState';
+import type {StateStore} from 'passport-oauth2';
 
 // Configuración de la estrategia JWT
 const jwtOptions: StrategyOptionsWithoutRequest = {
@@ -45,29 +47,23 @@ if (env.google.clientId && env.google.clientSecret) {
         clientSecret: env.google.clientSecret,
         callbackURL: env.google.callbackUrl,
         scope: ['profile', 'email'],
+        // Passport chooses one supported signature by function arity; its types
+        // incorrectly require both overloads and disallow null on verify success.
+        store: new GoogleStateStore(env.google.callbackUrl.startsWith('https://')) as unknown as StateStore,
       },
       async (accessToken, refreshToken, profile, done) => {
         try {
           // Buscar usuario por ID de Google
           let user = await User.findOne({ where: { google_id: profile.id } });
           
-          // Si no existe por google_id, verificar si existe por email
-          if (!user && profile.emails && profile.emails.length > 0) {
-            const email = profile.emails[0].value;
-            user = await User.findOne({ where: { email } });
-            
-            if (user) {
-              if (!user.activo) return done(null, false);
-              // Si el usuario existe pero no tiene google_id, actualizar
-              user.google_id = profile.id;
-              await user.save();
-            }
-          }
-          
-          // Si aún no existe, crear nuevo usuario
+          // A matching email is not authorization to link an existing identity.
+          // Existing users must sign in with their original method.
           if (!user) {
+            const email = profile.emails?.find(item => item.verified === true)?.value;
+            if (!email || !profile.id) return done(null, false);
+            if (await User.findOne({where:{email}})) return done(null, false, {message:'identity-conflict'});
             user = await User.create({
-              email: profile.emails?.[0].value || '',
+              email,
               nombre: profile.displayName || profile.name?.givenName || 'Usuario de Google',
               google_id: profile.id,
               rol: 'usuario',

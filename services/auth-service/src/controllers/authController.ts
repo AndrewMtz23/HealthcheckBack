@@ -6,7 +6,7 @@ import { revokeSession } from '../utils/sessions';
 import env from '../config/env';
 import { Op } from 'sequelize';
 import {ProfileError,validateProfile} from '../profile/validation';
-const profilePayload=(user:User)=>({id:user.id,email:user.email,nombre:user.nombre,telefono:user.telefono,imagen_url:user.imagen_url,rol:user.rol,fecha_registro:user.fecha_registro,ultima_conexion:user.ultima_conexion});
+const profilePayload=(user:User)=>({id:user.id,email:user.email,nombre:user.nombre,telefono:user.telefono,imagen_url:user.imagen_url,rol:user.rol,fecha_registro:user.fecha_registro,ultima_conexion:user.ultima_conexion,password_enabled:!!user.contrasena});
 
 /**
  * Registrar un nuevo usuario
