@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { validationResult, body, ValidationChain } from 'express-validator';
+import {validPassword} from '../account/security';
 
 /**
  * Middleware para validar resultados de express-validator
@@ -10,7 +11,7 @@ export const validate = (req: Request, res: Response, next: NextFunction): void 
     res.status(400).json({
       status: 'error',
       message: 'Error de validación',
-      errors: errors.array(),
+      errors: errors.array().map(error => ({message:error.msg})),
     });
     return;
   }
@@ -28,8 +29,8 @@ export const registerValidationRules = [
     .notEmpty()
     .withMessage('El nombre es obligatorio'),
   body('contrasena')
-    .isLength({ min: 6 })
-    .withMessage('La contraseña debe tener al menos 6 caracteres'),
+    .custom(validPassword)
+    .withMessage('La contraseña debe tener al menos 8 caracteres y como máximo 72 bytes'),
 ];
 
 /**

@@ -22,7 +22,7 @@ publicRoutes.forEach(route => {
       console.log(`Accediendo a ruta pública: ${route.path}`);
       
       // Aplicar rate limiting para rutas de autenticación sensibles
-      if (route.path.includes('/login') || route.path.includes('/register')) {
+      if (route.path.includes('/login') || route.path.includes('/register') || route.path.startsWith('/password/')) {
         authRateLimit(req, res, next);
       } else {
         next();

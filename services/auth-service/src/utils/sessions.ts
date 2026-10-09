@@ -1,6 +1,7 @@
 import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
 import env from '../config/env';
 import type User from '../models/User';
+import { recoveryTokens } from '../account/security';
 
 // Deliberately process-local: a restart expires every session, never revives one.
 // All validators must use this Auth instance. No replica-local JWT fallback.
@@ -41,5 +42,6 @@ export function validSession(id: unknown, user: User): boolean {
 }
 export function revokeSession(id: string) { sessions.delete(id); }
 export function revokeUserSessions(userId: number) {
+  recoveryTokens.revoke(userId);
   for (const [id, session] of sessions) if (session.userId === userId) sessions.delete(id);
 }
