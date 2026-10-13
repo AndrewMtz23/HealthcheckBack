@@ -4,13 +4,14 @@ import User from '../models/User';
 import sequelize from '../config/db';
 import { authenticate } from '../middleware/auth';
 import { AnnouncementError, validateAnnouncementDraft } from './announcementValidation';
+import { createAnnouncementAdminAuthorization } from './announcementAuthorization';
 
 const router = Router();
 const run = (fn:(req:Request,res:Response)=>Promise<void>) => (req:Request,res:Response,next:NextFunction) => { fn(req,res).catch(next); };
 const idOf = (req:Request) => { const id=Number(req.params.id); if(!Number.isSafeInteger(id)||id<1) throw new AnnouncementError(400,'ID inválido'); return id; };
 const listSql = `SELECT a.*, json_build_object('queued',coalesce(sum(t.total) FILTER (WHERE t.state='queued'),0),'retry',coalesce(sum(t.total) FILTER (WHERE t.state='retry'),0),'sending',coalesce(sum(t.total) FILTER (WHERE t.state='sending'),0),'sent',coalesce(sum(t.total) FILTER (WHERE t.state='sent'),0),'failed',coalesce(sum(t.total) FILTER (WHERE t.state='failed'),0),'uncertain',coalesce(sum(t.total) FILTER (WHERE t.state='uncertain'),0),'cancelled',coalesce(sum(t.total) FILTER (WHERE t.state='cancelled'),0)) AS delivery_counts FROM system_announcements a LEFT JOIN system_announcement_email_totals t ON t.announcement_id=a.id`;
 router.use(authenticate);
-router.use(run(async(req,res)=>{ const user=await User.findByPk((req.user as any)?.id,{attributes:['id','rol','activo']}); if(!user?.activo||user.rol!=='admin') throw new AnnouncementError(403,'Se requiere administrador activo'); res.locals.adminId=user.id; res.locals.adminChecked=true; }));
+router.use(createAnnouncementAdminAuthorization(id => User.findByPk(id, { attributes: ['id', 'rol', 'activo'] })));
 router.get('/',run(async(req,res)=>{
  const page=Math.max(1,Number(req.query.page||1)),limit=Math.min(50,Math.max(1,Number(req.query.limit||20)));
  if(!Number.isSafeInteger(page)||page>100000||!Number.isSafeInteger(limit))throw new AnnouncementError(400,'Paginación inválida');
