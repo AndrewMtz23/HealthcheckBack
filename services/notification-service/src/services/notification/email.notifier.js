@@ -1,11 +1,31 @@
 const NotificationInterface = require('./notification.interface');
-const { emailConfig } = require('../../config');
+const emailConfig = require('../../config/email');
 const logger = require('../../utils/logger');
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
+const accepted = result => !!result?.accepted?.length && !result?.rejected?.length;
 
 /**
  * Implementación de notificación por email
  */
 class EmailNotifier extends NotificationInterface {
+  async sendDelivery(recipient, notifications, messageId) {
+    // Durable worker owns retries and records sanitized outcome codes.
+    return emailConfig.transporter.sendMail({...emailConfig.emailDefaults,
+      to:recipient.email, messageId,
+      subject:`HealthCheck: Alertas de desinformación (${notifications.length})`,
+      html:this._generateBulkEmailTemplate(recipient.nombre,notifications)});
+  }
+  async sendAnnouncement(recipient, announcement, messageId) {
+    const title=escapeHtml(announcement.title);
+    const body=escapeHtml(announcement.body).replace(/\r?\n/g,'<br>');
+    const configured=process.env.FRONTEND_URL||'http://localhost:3000';
+    const link=`${configured.replace(/\/$/,'')}/notifications`;
+    return emailConfig.transporter.sendMail({...emailConfig.emailDefaults,
+      to:recipient.email, messageId,
+      subject:`HealthCheck: ${announcement.title}`,
+      text:`${announcement.title}\n\n${announcement.body}\n\nConsulta tus avisos: ${link}`,
+      html:`<div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:24px"><h1>HealthCheck</h1><h2>${title}</h2><p style="line-height:1.6">${body}</p><p><a href="${link}">Consultar mis avisos</a></p><small>Este aviso se envió a las cuentas activas de HealthCheck.</small></div>`});
+  }
   /**
    * Envía un email individual
    * @param {Object} recipient - Destinatario {email, nombre}
@@ -24,10 +44,9 @@ class EmailNotifier extends NotificationInterface {
         html: this._generateIndividualEmailTemplate(nombre, titulo, mensaje)
       };
       
-      await emailConfig.transporter.sendMail(mailOptions);
-      return true;
+      return accepted(await emailConfig.transporter.sendMail(mailOptions));
     } catch (error) {
-      logger.error('Error al enviar email:', error);
+      logger.error('Error al enviar email');
       return false;
     }
   }
@@ -40,7 +59,7 @@ class EmailNotifier extends NotificationInterface {
   async sendBulk(notifications) {
     try {
       // Agrupar por usuario (email)
-      const emailGroups = {};
+      const emailGroups = Object.create(null);
       
       for (const notification of notifications) {
         const { email, nombre } = notification;
@@ -77,15 +96,19 @@ class EmailNotifier extends NotificationInterface {
           html: this._generateBulkEmailTemplate(nombre, notifications)
         };
         
-        await emailConfig.transporter.sendMail(mailOptions);
-        
-        // Recopilar IDs de notificaciones enviadas
-        notifications.forEach(n => sentNotificationIds.push(n.id));
+        try {
+          if (accepted(await emailConfig.transporter.sendMail(mailOptions))) {
+            notifications.forEach(n => sentNotificationIds.push(n.id));
+          }
+        } catch {
+          // A later recipient failing must not erase earlier SMTP acceptances.
+          logger.error('Error al enviar un grupo de notificaciones');
+        }
       }
       
       return sentNotificationIds;
     } catch (error) {
-      logger.error('Error al enviar emails agrupados:', error);
+      logger.error('Error al preparar emails agrupados');
       return [];
     }
   }
@@ -95,6 +118,7 @@ class EmailNotifier extends NotificationInterface {
    * @private
    */
   _generateIndividualEmailTemplate(nombre, subject, body) {
+    nombre = escapeHtml(nombre); subject = escapeHtml(subject); body = escapeHtml(body);
     return `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px;">
         <div style="text-align: center; margin-bottom: 20px;">
@@ -120,9 +144,9 @@ class EmailNotifier extends NotificationInterface {
    */
   _generateBulkEmailTemplate(nombre, notifications) {
     // Agrupar por tema
-    const temaGroups = {};
+    const temaGroups = Object.create(null);
     notifications.forEach(notif => {
-      const tema = notif.tema || 'General';
+      const tema = notif.tema || notif.tema_nombre || 'General';
       if (!temaGroups[tema]) {
         temaGroups[tema] = [];
       }
@@ -134,17 +158,17 @@ class EmailNotifier extends NotificationInterface {
     for (const tema in temaGroups) {
       notificationsHtml += `
         <div style="margin-bottom: 25px;">
-          <h3 style="color: #444; border-bottom: 1px solid #ddd; padding-bottom: 10px;">${tema}</h3>
+          <h3 style="color: #444; border-bottom: 1px solid #ddd; padding-bottom: 10px;">${escapeHtml(tema)}</h3>
           <div>
       `;
       
       temaGroups[tema].forEach(notif => {
         notificationsHtml += `
           <div style="margin-bottom: 20px; padding: 15px; background-color: #f8f8f8; border-left: 4px solid #e74c3c; border-radius: 4px;">
-            <h4 style="margin-top: 0; color: #e74c3c;">${notif.titulo}</h4>
-            <p style="color: #555;">${notif.mensaje}</p>
-            ${notif.noticia_titulo ? `<p style="font-style: italic; color: #777;">Noticia: "${notif.noticia_titulo}"</p>` : ''}
-            ${notif.confianza ? `<p style="font-weight: bold;">Confianza: ${notif.confianza}%</p>` : ''}
+            <h4 style="margin-top: 0; color: #e74c3c;">${escapeHtml(notif.titulo)}</h4>
+            <p style="color: #555;">${escapeHtml(notif.mensaje)}</p>
+            ${notif.noticia_titulo ? `<p style="font-style: italic; color: #777;">Noticia: "${escapeHtml(notif.noticia_titulo)}"</p>` : ''}
+            ${notif.confianza ? `<p style="font-weight: bold;">Confianza: ${escapeHtml(notif.confianza)}%</p>` : ''}
           </div>
         `;
       });
@@ -162,7 +186,7 @@ class EmailNotifier extends NotificationInterface {
           <p style="color: #777; font-size: 14px; margin-top: 5px;">Verificación de información en salud</p>
         </div>
         
-        <h2 style="color: #333;">Hola${nombre ? ` ${nombre}` : ''}!</h2>
+        <h2 style="color: #333;">Hola${nombre ? ` ${escapeHtml(nombre)}` : ''}!</h2>
         <p style="color: #555;">HealthCheck ha detectado ${notifications.length} posible${notifications.length !== 1 ? 's' : ''} caso${notifications.length !== 1 ? 's' : ''} de desinformación sobre temas que te interesan:</p>
         
         ${notificationsHtml}

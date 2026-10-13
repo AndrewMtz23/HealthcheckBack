@@ -5,13 +5,17 @@ import { validate, registerValidationRules, loginValidationRules } from '../midd
 import passport from 'passport';
 import adminUsers from '../admin/users';
 import profileRoutes from '../profile/routes';
+import announcements from '../admin/announcements';
+import inboxRoutes from '../profile/inboxRoutes';
 import {createRecoveryRouter} from '../account/routes';
 import env from '../config/env';
 
 const router = Router();
 router.use('/password', createRecoveryRouter());
 router.use('/admin/users', adminUsers);
+router.use('/admin/announcements', announcements);
 router.use('/profile', profileRoutes);
+router.use(inboxRoutes);
 
 // Rutas públicas
 router.post('/register', registerValidationRules, validate, authController.register);

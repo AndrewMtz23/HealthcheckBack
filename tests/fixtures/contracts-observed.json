@@ -1,0 +1,170 @@
+{
+  "source": "HTTP against isolated restored scratch DB 55432; synthetic only; news 500 is a known failure, not success",
+  "cases": [
+    {
+      "name": "normal-login",
+      "status": 200,
+      "ms": 119,
+      "body": {
+        "status": "success",
+        "message": "Inicio de sesión exitoso",
+        "data": {
+          "user": {
+            "id": -1,
+            "email": "normal@example.invalid",
+            "nombre": "normal",
+            "rol": "usuario"
+          },
+          "token": "<TOKEN>"
+        }
+      }
+    },
+    {
+      "name": "admin-login",
+      "status": 200,
+      "ms": 61,
+      "body": {
+        "status": "success",
+        "message": "Inicio de sesión exitoso",
+        "data": {
+          "user": {
+            "id": -2,
+            "email": "admin@example.invalid",
+            "nombre": "admin",
+            "rol": "admin"
+          },
+          "token": "<TOKEN>"
+        }
+      }
+    },
+    {
+      "name": "inactive-login",
+      "status": 401,
+      "ms": 56,
+      "body": {
+        "status": "error",
+        "message": "Este usuario ha sido desactivado"
+      }
+    },
+    {
+      "name": "oauth-password-login",
+      "status": 401,
+      "ms": 3,
+      "body": {
+        "status": "error",
+        "message": "Credenciales incorrectas"
+      }
+    },
+    {
+      "name": "normal-profile",
+      "status": 200,
+      "ms": 3,
+      "body": {
+        "status": "success",
+        "data": {
+          "user": {
+            "id": -1,
+            "email": "normal@example.invalid",
+            "nombre": "normal",
+            "telefono": null,
+            "rol": "usuario",
+            "fecha_registro": "<DATE>",
+            "ultima_conexion": "<DATE>"
+          }
+        }
+      }
+    },
+    {
+      "name": "oauth-profile-synthetic-token",
+      "status": 200,
+      "ms": 2,
+      "body": {
+        "status": "success",
+        "data": {
+          "user": {
+            "id": -4,
+            "email": "oauth@example.invalid",
+            "nombre": "oauth",
+            "telefono": null,
+            "rol": "usuario",
+            "fecha_registro": "<DATE>",
+            "ultima_conexion": null
+          }
+        }
+      }
+    },
+    {
+      "name": "user-forbidden-stats",
+      "status": 403,
+      "ms": 3,
+      "body": {
+        "status": "error",
+        "message": "Prohibido. No tiene los permisos necesarios."
+      }
+    },
+    {
+      "name": "admin-stats",
+      "status": 200,
+      "ms": 11,
+      "body": {
+        "status": "success",
+        "data": {
+          "classificationStats": [
+            {
+              "clasificacion": "falsa",
+              "total": "1"
+            },
+            {
+              "clasificacion": "verdadera",
+              "total": "1"
+            }
+          ],
+          "topicStats": [],
+          "sourceStats": [],
+          "monthlyTrend": [
+            {
+              "mes": "2026-01",
+              "total": "2"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "news-without-relations-known-schema-failure",
+      "status": 500,
+      "ms": 9,
+      "body": {
+        "status": "error",
+        "message": "Error al obtener noticia"
+      }
+    },
+    {
+      "name": "news-multiple-classifications-known-schema-failure",
+      "status": 500,
+      "ms": 9,
+      "body": {
+        "status": "error",
+        "message": "Error al obtener noticia"
+      }
+    },
+    {
+      "name": "register",
+      "status": 201,
+      "ms": 59,
+      "body": {
+        "status": "success",
+        "message": "Usuario registrado correctamente",
+        "data": {
+          "user": {
+            "id": 1,
+            "email": "registered@example.invalid",
+            "nombre": "Synthetic registered",
+            "rol": "usuario"
+          },
+          "token": "<TOKEN>"
+        }
+      }
+    }
+  ]
+}

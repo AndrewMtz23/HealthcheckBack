@@ -45,7 +45,7 @@ flowchart LR
 | Notifications | Express, Nodemailer, Twilio | `3004`* | Email, SMS, preferences, scheduled delivery |
 | Machine learning | Flask, PyTorch, Transformers, LangChain | `5000` | Classification, training, scraping, chatbot |
 
-*Set `PORT=3004` for notifications. Its code defaults to `3001`, which conflicts with authentication; the gateway expects notifications on `3004`.*
+*Notifications now defaults to `3004`, matching the gateway; `PORT` can override it.*
 
 ## Repository layout
 
@@ -168,11 +168,10 @@ Install dependencies and start Flask:
 
 ```bash
 python -m pip install -r requirements.txt
-python -m pip install flask-cors
 python app.py
 ```
 
-`flask-cors` is imported by the application but is currently missing from `requirements.txt`, so it is installed separately above. Initial startup also downloads NLTK resources and requires internet access. Run from the service directory so relative model paths resolve correctly.
+`flask-cors` is included in the updated requirements file. Initial startup also downloads NLTK resources and requires internet access. Run from the service directory so relative model paths resolve correctly.
 
 ## API reference
 
@@ -212,7 +211,7 @@ For URL analysis, replace `text` with a `url` field containing the article addre
 - **Model evaluation:** the repository does not publish benchmark results or calibrated accuracy claims. Predictions are model output requiring source verification.
 - **Startup behavior:** ML starts scheduled scraping jobs, and notifications processes pending work on startup. Use a development database and appropriate integration accounts.
 - **Deployment:** `python app.py` enables Flask debug mode. There is no complete container setup; the ML `Dockerfile` is currently empty.
-- **Verification:** these instructions are based on the checked-in code. A complete installation and end-to-end run have not been validated as part of the repository separation.
+- **Verification:** auth/news/gateway builds passed on 2026-10-06; isolated integration passed 46 administrative and 26 profile HTTP checks. Provider delivery, live OAuth and a complete browser end-to-end flow remain unverified.
 
 ## Contributing
 
@@ -221,3 +220,32 @@ Keep changes scoped to the affected service, document configuration or API chang
 ## Attribution and license metadata
 
 This repository preserves the backend history extracted from the original HealthCheck project. Existing contributor attribution and package license declarations are retained. Node.js packages declare `ISC` in their manifests; a standalone repository-wide license file is not currently included.
+
+## Administrative and personal APIs
+
+Auth exposes GET/POST `/api/auth/admin/users` and PATCH `/api/auth/admin/users/:id`, with active administrator checks against the database, last-admin protection and image URL support. Only `admin` and `usuario` roles exist.
+
+GET/PUT `/api/auth/profile` supports `nombre`, `telefono`, `imagen_url`. Images are optional HTTP/HTTPS URLs up to 2048 characters with no embedded credentials; null/empty removes the image. No upload or server-side image fetching is implemented. Login and registration return complete editable profile data.
+
+Authenticated routes under `/api/auth/profile`: GET/PUT `/preferences`, GET/POST `/topics`, DELETE `/topics/:topicId`, GET `/notifications`, DELETE `/notifications/:notificationId`. User identity comes from the session. Preference reads do not create rows; writes serialize on the user; notifications are owner-scoped. The current frontend profile uses these routes instead of the legacy notification service.
+
+News exposes `/api/admin/summary`, `/news`, `/news/:id`, `/sources`, `/topics`, `/reports`, `/activity`, `/models`, `/notifications` and `/preferences`. Users belong to Auth. Sources/topics allow create/edit; reports allow resolution with an idempotent reliability adjustment. Other modules are read-oriented. Gateway CORS permits PATCH for administrative user edits while preserving the allowed-origin restriction.
+
+## Local runtime and schema boundaries
+
+The authorized local database is `localhost:5432/healtcheckbd`. Neon was deferred; no remote recovery or migration is claimed. Sequelize, existing SQL and SQLAlchemy remain; Prisma is not installed.
+
+`db.sql` now includes nullable `usuarios.imagen_url VARCHAR(2048)`. Existing local data also has `noticias.fecha_analisis` and the `dudosa` classification enum value; these news additions are not yet reflected in db.sql. Do not treat the SQL file as a complete current database baseline, and do not apply it to an existing populated database. Reconcile the actual catalog before migration.
+
+With `HEALTHCHECK_DIAGNOSTIC=1`, ML blocks prediction/training/scraping/chat and skips the scheduler; notifications blocks delivery, SMTP verification, scheduling and non-allowlisted HTTP operations. This is the mode used for local checks. Normal runtime can have external effects. Saving preferences does not prove delivery.
+
+Build auth/news/gateway before running `node --test tests/*.test.cjs`. The published Node suites contain 10 tests; the local workspace has an additional untracked diagnostic configuration test (11 total). `python tests/test_ml_safety.py` checks two runtime guards. `node tests/admin-integration.cjs` requires an isolated PostgreSQL cluster on 127.0.0.1:55432 with role phase00, synthetic password unused, and data_directory equal to the workspace `.healthcheck-logs/phase00-pg`. It creates a fresh synthetic database and rejects other clusters; it must never target the application database. Local setup/probe scripts and fixtures are intentionally not part of the published branch.
+
+## Published feature branch
+
+`feat/admin-profile-platform` was pushed with four feature commits on 2026-10-06; last verified remote commit: `88376b5`. No merge or PR was performed in that session. README and other Markdown updates remain local and are not authorized for upload.
+
+
+## Actualización local — 2026-10-07
+
+Twilio retirado de notification-service. Las rutas HTTP heredadas de notificaciones están retiradas; usar las rutas autenticadas propias de Auth. Solo se aceptan nuevas preferencias email, sin convertir SMS existentes. Historial corregido: conteo, última clasificación, fechas y paginación. Ver `../Docs/User/verificacion.md` (local). Sin Prisma ni cambios de esquema en esta entrega.

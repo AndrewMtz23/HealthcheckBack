@@ -28,41 +28,33 @@ app.use(cors({
 
 app.use(express.json());
 
-// Verificar la conexión con el servidor de correo al iniciar
-if (!diagnostic) emailConfig.transporter.verify(function(error, success) {
-  if (error) {
-    logger.error('Error al conectar con el servidor de correo:', error);
-  } else {
-    logger.info('Servidor de correo listo para enviar mensajes');
-  }
-});
+// SMTP is never contacted just to start the HTTP service.
 
 // Registrar rutas
 app.use('/api', routes);
 
 // Endpoint de estado
 app.get('/', (req, res) => {
-  res.json({ status: 'ok' });
+  res.json({status:'ok',delivery:schedulerService.status});
 });
 
 // Iniciar el servidor
 const PORT = process.env.PORT || 3004;
 app.listen(PORT, async () => {
-  if (diagnostic) { logger.info(`Diagnostic service listening on ${PORT}; jobs and delivery disabled`); return; }
+  if (diagnostic) { logger.info(`Service listening on ${PORT}; diagnostic mode disables jobs and delivery`); return; }
   logger.info(`Servicio iniciado en puerto ${PORT}`);
   
   // Ejecutar inmediatamente al iniciar el servicio
   logger.info('Ejecutando verificación inicial de notificaciones...');
   try {
-    await schedulerService.processUnsentNotifications();
-    await schedulerService.generateFalseNewsNotifications();
+    await schedulerService.runOnce();
     logger.info('Verificación inicial completada');
   } catch (error) {
     logger.error('Error en verificación inicial:', error);
   }
 });
 
-// Configurar la tarea programada para procesar notificaciones pendientes y generar nuevas
+// Scheduled in-app announcements continue while SMTP is disabled; delivery remains opt-in.
 if (!diagnostic) schedulerService.startScheduler();
 
 module.exports = app;
