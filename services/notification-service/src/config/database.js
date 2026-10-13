@@ -10,14 +10,7 @@ const pool = new Pool({
   port: process.env.DB_PORT,
 });
 
-// Verificar conexión
-pool.query('SELECT NOW()', (err) => {
-  if (err) {
-    logger.error('Error al conectar a la base de datos:', err);
-  } else {
-    logger.info('Conexión a la base de datos establecida correctamente');
-  }
-});
+// Connections are opened by explicit worker operations, never on import.
 
 module.exports = {
   pool

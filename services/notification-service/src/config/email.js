@@ -1,18 +1,17 @@
 const nodemailer = require('nodemailer');
 
-// Configuración del cliente de correo electrónico con Hostinger
-const transporter = process.env.HEALTHCHECK_DIAGNOSTIC === '1' ? {
-  async sendMail() { throw new Error('Email delivery disabled in diagnostic mode'); },
-  verify(callback) { callback(new Error('SMTP verification disabled in diagnostic mode')); }
-} : nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,
-  port: process.env.EMAIL_PORT,
-  secure: process.env.EMAIL_SECURE, // true para el puerto 465, false para otros puertos
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
-  }
-});
+const env = process.env;
+const port = Number(env.EMAIL_PORT || 587);
+const enabled = env.NOTIFICATION_DELIVERY_ENABLED === 'true'
+  && env.HEALTHCHECK_DIAGNOSTIC !== '1' && env.NODE_ENV !== 'test'
+  && !!env.EMAIL_HOST && !!env.EMAIL_USER && !!env.EMAIL_PASS && [465,587].includes(port);
+// Configuration never connects/verifies SMTP. Actual delivery is opt-in.
+const transporter = enabled ? nodemailer.createTransport({
+  host:env.EMAIL_HOST, port, secure:port === 465, requireTLS:true,
+  auth:{user:env.EMAIL_USER, pass:env.EMAIL_PASS}, tls:{rejectUnauthorized:true},
+  connectionTimeout:5000, greetingTimeout:5000, socketTimeout:10000,
+  disableFileAccess:true, disableUrlAccess:true, logger:false, debug:false,
+}) : {async sendMail() {throw new Error('Notification delivery disabled');}};
 
 // Configuración común para los emails
 const emailDefaults = {
@@ -23,6 +22,7 @@ const emailDefaults = {
 };
 
 module.exports = {
+  enabled,
   transporter,
   emailDefaults
 };

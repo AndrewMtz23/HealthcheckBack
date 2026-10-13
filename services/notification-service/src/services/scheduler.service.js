@@ -1,214 +1,48 @@
-const cron = require('node-cron');
-const { notificationFactory } = require('./notification');
-const notificationModel = require('../models/notification.model');
-const preferenceModel = require('../models/preference.model');
-const { pool } = require('../config/database');
+﻿const cron = require('node-cron');
+const {pool} = require('../config/database');
+const emailConfig = require('../config/email');
+const EmailNotifier = require('./notification/email.notifier');
+const {DeliveryWorker} = require('./delivery-worker');
+const {AnnouncementDeliveryWorker} = require('./announcement-delivery-worker');
 const logger = require('../utils/logger');
-
-/**
- * Servicio para manejar tareas programadas
- */
+const notifier = new EmailNotifier();
 class SchedulerService {
-  /**
-   * Inicia el programador de tareas
-   */
+  constructor() {
+    this.running = false;
+    this.status = {enabled:emailConfig.enabled, ready:false, last_run:null};
+    this.announcementRunning = false;
+    this.worker = new DeliveryWorker({pool,send:(user,items,messageId)=>notifier.sendDelivery(user,items,messageId)});
+    this.announcementWorker = new AnnouncementDeliveryWorker({pool,send:(user,announcement,messageId)=>notifier.sendAnnouncement(user,announcement,messageId),frontendUrl:process.env.FRONTEND_URL});
+  }
+  async runOnce() {
+    if (this.running) return this.status;
+    this.running = true;
+    try {
+      let result={ready:false};
+      if(emailConfig.enabled){try{result=await this.worker.runOnce();}catch{logger.error('News email worker failed; system announcements continue independently');}}
+      const announcements=await this.runAnnouncementsOnce();
+      this.status = {...this.status,ready:result.ready||announcements.ready,last_run:new Date().toISOString()};
+      if (!result.ready && !announcements.ready) logger.warn('Notification schema unavailable; delivery remains paused');
+    } catch {
+      this.status.ready = false;
+      logger.error('Notification worker failed; inspect database availability and delivery state');
+    } finally { this.running = false; }
+    return this.status;
+  }
+  async runAnnouncementsOnce() {
+    if(this.announcementRunning)return {ready:this.status.announcements_ready===true,busy:true};
+    this.announcementRunning=true;
+    try {
+      const result=await this.announcementWorker.runOnce({deliver:emailConfig.enabled});
+      this.status.announcements_ready=result.ready;
+      return result;
+    } catch {this.status.announcements_ready=false;logger.error('System announcement worker failed; inspect database and delivery state');return {ready:false};}
+    finally {this.announcementRunning=false;}
+  }
   startScheduler() {
-    // Programar tarea para ejecutarse cada 15 minutos
-    cron.schedule('*/15 * * * *', async () => {
-      logger.info('Ejecutando verificación programada de notificaciones');
-      try {
-        await this.processUnsentNotifications();
-        await this.generateFalseNewsNotifications();
-      } catch (error) {
-        logger.error('Error en la tarea programada de notificaciones:', error);
-      }
-    });
-    
-    logger.info('Programador de tareas iniciado');
-  }
-  
-  /**
-   * Procesa notificaciones pendientes de envío
-   */
-  async processUnsentNotifications() {
-    try {
-      // Obtener notificaciones pendientes
-      const pendingNotifications = await notificationModel.getPending();
-      
-      if (pendingNotifications.length === 0) {
-        logger.info('No hay notificaciones pendientes para procesar');
-        return;
-      }
-      
-      // Separar notificaciones por tipo
-      const notificationsByType = this._groupNotificationsByType(pendingNotifications);
-      
-      // Procesar cada tipo de notificación
-      for (const type in notificationsByType) {
-        const notifier = notificationFactory.createNotifier(type);
-        const notifications = notificationsByType[type];
-        
-        // Enviar notificaciones en grupo
-        const sentIds = await notifier.sendBulk(notifications);
-        
-        // Marcar como enviadas las notificaciones exitosas
-        if (sentIds.length > 0) {
-          await notificationModel.markMultipleAsSent(sentIds);
-          logger.info(`${sentIds.length} notificaciones de tipo ${type} marcadas como enviadas`);
-        }
-      }
-    } catch (error) {
-      logger.error('Error al procesar notificaciones pendientes:', error);
-      throw error;
-    }
-  }
-  
-  /**
-   * Genera notificaciones automáticas para noticias falsas
-   */
-  async generateFalseNewsNotifications() {
-    const client = await pool.connect();
-    
-    try {
-      // Obtener usuarios con notificaciones activas y sus temas
-      const usersWithPreferences = await preferenceModel.getUsersWithActiveNotifications();
-      
-      if (usersWithPreferences.length === 0) {
-        logger.info('No hay usuarios con notificaciones activas');
-        return;
-      }
-      
-      // Para almacenar notificaciones agrupadas por tipo antes de enviarlas
-      const pendingNotifications = [];
-      
-      for (const user of usersWithPreferences) {
-        // Verificar si el usuario tiene temas de interés
-        if (!user.topics || user.topics.length === 0) {
-          continue;
-        }
-        
-        const topicIds = user.topics.map(topic => topic.id);
-        
-        // Determinar el intervalo de tiempo según frecuencia
-        const timeRange = this._getTimeRangeByFrequency(user.frecuencia_notificaciones);
-        
-        // Buscar noticias falsas recientes
-        const noticiasResult = await client.query(
-          `SELECT n.id, n.titulo, t.nombre as tema_nombre, cn.resultado, cn.confianza
-           FROM noticias n
-           JOIN clasificacion_noticias cn ON n.id = cn.noticia_id
-           JOIN temas t ON n.tema_id = t.id
-           WHERE n.tema_id = ANY($1)
-             AND n.created_at > NOW() - INTERVAL '${timeRange}'
-             AND cn.resultado = 'falsa'
-             AND NOT EXISTS (
-               SELECT 1 FROM notificaciones
-               WHERE usuario_id = $2 AND noticia_id = n.id
-             )
-           ORDER BY cn.confianza DESC, n.created_at DESC
-           LIMIT 5`,
-          [topicIds, user.id]
-        );
-        
-        // Si no hay noticias falsas para este usuario, continuar con el siguiente
-        if (noticiasResult.rows.length === 0) {
-          continue;
-        }
-        
-        // Preparar datos para crear notificaciones
-        for (const noticia of noticiasResult.rows) {
-          const titulo = `Alerta: ${noticia.tema_nombre}`;
-          const mensaje = `HealthCheck ha detectado información falsa: "${noticia.titulo}" (${noticia.confianza}% de probabilidad)`;
-          
-          // Determinar tipo de notificación
-          if (user.tipo_notificacion !== 'email' || !user.email) continue;
-          const tipo = 'email';
-          
-          pendingNotifications.push({
-            usuario_id: user.id,
-            noticia_id: noticia.id,
-            titulo,
-            mensaje,
-            tipo,
-            tema_nombre: noticia.tema_nombre,
-            noticia_titulo: noticia.titulo,
-            confianza: noticia.confianza,
-            email: user.email,
-            telefono: user.telefono,
-            nombre: user.nombre
-          });
-        }
-      }
-      
-      // Crear notificaciones en la base de datos
-      if (pendingNotifications.length > 0) {
-        const createdNotifications = await notificationModel.createBulkForFalseNews(pendingNotifications);
-        
-        // Agrupar notificaciones por tipo
-        const notificationsByType = this._groupNotificationsByType(createdNotifications);
-        
-        // Enviar notificaciones inmediatamente
-        for (const type in notificationsByType) {
-          const notifier = notificationFactory.createNotifier(type);
-          const notifications = notificationsByType[type];
-          
-          // Enviar notificaciones en grupo
-          const sentIds = await notifier.sendBulk(notifications);
-          
-          // Marcar como enviadas las notificaciones exitosas
-          if (sentIds.length > 0) {
-            await notificationModel.markMultipleAsSent(sentIds);
-            logger.info(`${sentIds.length} nuevas notificaciones de tipo ${type} enviadas`);
-          }
-        }
-      } else {
-        logger.info('No se generaron nuevas notificaciones');
-      }
-    } catch (error) {
-      logger.error('Error al generar notificaciones automáticas:', error);
-      throw error;
-    } finally {
-      client.release();
-    }
-  }
-  
-  /**
-   * Agrupa notificaciones por tipo
-   * @private
-   * @param {Array} notifications - Lista de notificaciones
-   * @returns {Object} - Notificaciones agrupadas por tipo
-   */
-  _groupNotificationsByType(notifications) {
-    const result = {};
-    
-    for (const notification of notifications) {
-      if (notification.tipo !== 'email') continue;
-      const type = notification.tipo;
-      
-      if (!result[type]) {
-        result[type] = [];
-      }
-      
-      result[type].push(notification);
-    }
-    
-    return result;
-  }
-  
-  /**
-   * Obtiene el intervalo de tiempo en formato PostgreSQL según la frecuencia
-   * @private
-   * @param {string} frequency - Frecuencia de notificaciones
-   * @returns {string} - Intervalo de tiempo
-   */
-  _getTimeRangeByFrequency(frequency) {
-    switch (frequency) {
-      case 'inmediata': return '1 hour';
-      case 'diaria': return '24 hours';
-      case 'semanal': return '7 days';
-      default: return '24 hours';
-    }
+    if (this.task) return;
+    this.task = cron.schedule('*/15 * * * *',()=>this.runOnce(),{timezone:'America/Mexico_City'});
+    this.announcementTask = cron.schedule('* * * * *',()=>this.runAnnouncementsOnce(),{timezone:'America/Mexico_City'});
   }
 }
-
 module.exports = new SchedulerService();
