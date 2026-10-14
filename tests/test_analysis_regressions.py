@@ -122,9 +122,11 @@ class AnalysisRegression(unittest.TestCase):
             self.assertEqual(first.json[key], second.json[key], key)
         self.assertEqual(self.counts(), (1, 1, 1, 1, 1, 1))
 
-    def test_different_user_reuses_analysis_but_gets_own_history(self):
+    def test_different_user_reuses_published_analysis_but_gets_own_history(self):
         body = {'text': 'Synthetic health news for testing.'}
         first = self.post(body)
+        db.session.get(Noticia, first.json['Noticia ID']).editorial_state = 'published'
+        db.session.commit()
         second = self.post(body, {**HEADERS, 'X-User-Id': '2'})
         self.assertEqual(second.status_code, 200, second.json)
         self.assertEqual(first.json['Noticia ID'], second.json['Noticia ID'])

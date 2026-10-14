@@ -3,6 +3,7 @@ import { authenticate } from '../middleware/auth';
 import { AdminError, positiveId } from './query';
 import { sql, list, detail, summary } from './read';
 import { saveContent, resolveReport } from './write';
+import {createEditorialNews,updateEditorialNews,transitionEditorialNews} from '../editorial/service';
 const router = Router();
 export const run = (fn: (req: Request, res: Response) => Promise<void>) => (req: Request, res: Response, next: NextFunction) => { fn(req, res).catch(next); };
 router.use(authenticate, async (req, res, next) => { try {
@@ -16,11 +17,14 @@ router.use(authenticate, async (req, res, next) => { try {
 catch (error) {
     next(error);
 } });
+router.post('/news',run(async(req,res)=>{res.status(201).json({status:'success',data:await createEditorialNews(req.body,req.user!.id)});}));
+router.patch('/news/:id',run(async(req,res)=>{res.json({status:'success',data:await updateEditorialNews(positiveId(req.params.id),req.body,req.user!.id)});}));
+router.post('/news/:id/editorial',run(async(req,res)=>{res.json({status:'success',data:await transitionEditorialNews(positiveId(req.params.id),req.body,req.user!.id)});}));
 router.get('/summary', run(async (req, res) => { res.json({ status: 'success', data: await summary(req.query) }); }));
 router.get('/news/:id', run(async (req, res) => { res.json({ status: 'success', data: await detail(positiveId(req.params.id)) }); }));
 router.get('/:section', run(async (req, res) => { res.json({ status: 'success', data: await list(req.params.section, req.query) }); }));
 router.post('/:section', run(async (req, res) => { res.status(201).json({ status: 'success', data: await saveContent(req.params.section, null, req.body, req.user!.id) }); }));
-router.patch('/reports/:id', run(async (req, res) => { res.json({ status: 'success', data: await resolveReport(positiveId(req.params.id), req.body.estado, req.user!.id) }); }));
+router.patch('/reports/:id', run(async (req, res) => { res.json({ status: 'success', data: await resolveReport(positiveId(req.params.id), req.body.estado, req.user!.id, req.body.resolution_note) }); }));
 router.patch('/:section/:id', run(async (req, res) => { res.json({ status: 'success', data: await saveContent(req.params.section, positiveId(req.params.id), req.body, req.user!.id) }); }));
 router.use((error: any, _req: Request, res: Response, _next: NextFunction) => { const status = error instanceof AdminError ? error.status : 500; res.status(status).json({ status: 'error', message: status === 500 ? 'No se pudo consultar el módulo' : error.message }); });
 export default router;

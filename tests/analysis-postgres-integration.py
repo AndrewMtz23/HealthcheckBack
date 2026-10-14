@@ -6,6 +6,7 @@ from threading import Barrier
 from pathlib import Path
 import sys
 import uuid
+import os
 import psycopg2
 from psycopg2 import sql
 
@@ -19,7 +20,8 @@ from utils.db_utils import save_complete_analysis, get_cached_analysis
 
 
 def run():
-    cfg = dict(host='127.0.0.1', port=55432, user='phase00', password='unused', connect_timeout=3)
+    port = int(os.environ.get('EDITORIAL_TEST_PORT', '55432'))
+    cfg = dict(host='127.0.0.1', port=port, user='phase00', password='unused', connect_timeout=3)
     control = psycopg2.connect(**cfg, dbname='postgres', options='-c default_transaction_read_only=off')
     control.autocommit = True
     name = 'ml_analysis_' + uuid.uuid4().hex
@@ -34,7 +36,7 @@ def run():
                 raise RuntimeError('Refusing a PostgreSQL cluster outside the isolated fixture')
             cur.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(name)))
             created = True
-        app.config.update(SQLALCHEMY_DATABASE_URI=f'postgresql://phase00:unused@127.0.0.1:55432/{name}',
+        app.config.update(SQLALCHEMY_DATABASE_URI=f'postgresql://phase00:unused@127.0.0.1:{port}/{name}',
             SQLALCHEMY_ENGINE_OPTIONS={'connect_args': {'options': '-c default_transaction_read_only=off -c statement_timeout=10000'}})
         db.init_app(app)
         with app.app_context():
@@ -62,6 +64,9 @@ def run():
             def counts(): return tuple(db.session.query(m).count() for m in tables)
             assert counts() == (1, 1, 1, 1, 1, 1), counts()
             assert Fuente.query.one().noticias_verdaderas == 1
+            assert get_cached_analysis(payload['url'], None, 1, 2) is None
+            Noticia.query.one().editorial_state = 'published'
+            db.session.commit()
             cached = get_cached_analysis(payload['url'], None, 1, 2)
             assert cached['noticia_id'] == results[0]['noticia_id']
             assert HistorialConsulta.query.count() == 2

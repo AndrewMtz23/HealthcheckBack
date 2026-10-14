@@ -1,6 +1,7 @@
 import { QueryTypes, UniqueConstraintError } from 'sequelize';
 import sequelize from '../config/db';
 import { AdminError } from './query';
+import {reasonValue} from '../editorial/validation';
 export function contentValues(section: string, body: any, create: boolean) {
     if (!body || typeof body !== 'object' || Array.isArray(body))
         throw new AdminError(400, 'Datos inválidos');
@@ -64,7 +65,8 @@ export async function saveContent(section: string, id: number | null, body: any,
         throw error;
     }
 }
-export async function resolveReport(id: number, estado: string, actor: number) {
+export async function resolveReport(id: number, estado: string, actor: number, note?: string) {
+    const resolution_note=reasonValue(note);
     if (!['revisado', 'desestimado'].includes(estado))
         throw new AdminError(400, 'Selecciona revisado o desestimado');
     return sequelize.transaction(async (transaction) => {
@@ -81,7 +83,8 @@ export async function resolveReport(id: number, estado: string, actor: number) {
             throw new AdminError(409, 'Este reporte ya fue resuelto');
         if (estado === 'revisado')
             await sequelize.query('UPDATE fuentes SET confiabilidad=GREATEST(0,confiabilidad-0.1),updated_at=now() WHERE id=:id', { replacements: { id: report.fuente_id }, transaction });
-        const updated = await sequelize.query('UPDATE reportes_fuente SET estado=:estado,fecha_revision=now() WHERE id=:id RETURNING *', { replacements: { id, estado }, type: QueryTypes.SELECT, transaction });
+        const updated = await sequelize.query('UPDATE reportes_fuente SET estado=:estado,fecha_revision=now(),resolution_note=:resolution_note,resolved_by=:actor WHERE id=:id RETURNING *', { replacements: { id, estado, resolution_note, actor }, type: QueryTypes.SELECT, transaction });
+        await sequelize.query('INSERT INTO source_report_events(report_id,actor_id,state,note) VALUES(:id,:actor,:estado,:resolution_note)', {replacements:{id,actor,estado,resolution_note},transaction});
         return updated[0];
     });
 }

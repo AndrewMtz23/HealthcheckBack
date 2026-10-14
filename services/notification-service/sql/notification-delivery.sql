@@ -25,6 +25,7 @@ CREATE TABLE notification_delivery_items (
  delivery_id BIGINT NOT NULL REFERENCES notification_deliveries(id) ON DELETE CASCADE,
  usuario_id INT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
  noticia_id INT NOT NULL REFERENCES noticias(id) ON DELETE CASCADE,
+ content_version INTEGER NOT NULL DEFAULT 1 CHECK(content_version>0),
  notification_id INT REFERENCES notificaciones(id) ON DELETE SET NULL,
  excluded BOOLEAN NOT NULL DEFAULT false,
  UNIQUE(usuario_id,noticia_id),

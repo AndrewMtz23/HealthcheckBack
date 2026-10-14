@@ -45,12 +45,12 @@ class DeliveryWorker {
         // Legacy timestamps follow the application's UTC storage convention.
         const existing=(await client.query('SELECT id FROM notification_deliveries WHERE usuario_id=$1 AND frequency=$2 AND slot=$3',[id,pref.frecuencia_notificaciones,until])).rowCount;
         if(existing){await client.query('COMMIT');continue;}
-        const news=(await client.query(`SELECT n.id,n.titulo,t.nombre AS tema_nombre FROM noticias n
+        const news=(await client.query(`SELECT n.id,n.titulo,n.content_version,t.nombre AS tema_nombre FROM noticias n
           JOIN temas t ON t.id=n.tema_id AND t.activo=true
           JOIN preferencias_usuario_temas pt ON pt.tema_id=t.id AND pt.usuario_id=$1
-          JOIN LATERAL (SELECT resultado,fecha_clasificacion FROM clasificacion_noticias WHERE noticia_id=n.id ORDER BY fecha_clasificacion DESC,id DESC LIMIT 1) c ON true
-          WHERE c.resultado='falsa' AND c.fecha_clasificacion AT TIME ZONE 'UTC' > $2
-          AND c.fecha_clasificacion AT TIME ZONE 'UTC' <= $3
+          JOIN LATERAL (SELECT resultado,fecha_clasificacion FROM clasificacion_noticias WHERE noticia_id=n.id AND content_version=n.content_version ORDER BY fecha_clasificacion DESC,id DESC LIMIT 1) c ON true
+          WHERE news_is_public(n) AND c.resultado='falsa' AND GREATEST(n.editorial_published_at,c.fecha_clasificacion AT TIME ZONE 'UTC') > $2
+          AND GREATEST(n.editorial_published_at,c.fecha_clasificacion AT TIME ZONE 'UTC') <= $3
           AND NOT EXISTS(SELECT 1 FROM notificaciones WHERE usuario_id=$1 AND noticia_id=n.id)
           AND NOT EXISTS(SELECT 1 FROM notification_delivery_items WHERE usuario_id=$1 AND noticia_id=n.id)
           ORDER BY c.fecha_clasificacion,n.id`,[id,from,until])).rows;
@@ -59,7 +59,7 @@ class DeliveryWorker {
         const delivery=(await client.query('INSERT INTO notification_deliveries(usuario_id,frequency,slot,available_at) VALUES($1,$2,$3,$3) RETURNING id',[id,pref.frecuencia_notificaciones,until])).rows[0];
         for(const item of news) {
           const notification=(await client.query(`INSERT INTO notificaciones(usuario_id,noticia_id,titulo,mensaje,tipo,enviada,fecha_creacion) VALUES($1,$2,$3,$4,'email',false,$5) RETURNING id`,[id,item.id,`Alerta: ${item.tema_nombre}`,`El análisis automático señaló posible desinformación en: ${item.titulo}. Consulta el análisis y sus fuentes.`,now.toISOString()])).rows[0];
-          await client.query('INSERT INTO notification_delivery_items(delivery_id,usuario_id,noticia_id,notification_id) VALUES($1,$2,$3,$4)',[delivery.id,id,item.id,notification.id]);
+          await client.query('INSERT INTO notification_delivery_items(delivery_id,usuario_id,noticia_id,notification_id,content_version) VALUES($1,$2,$3,$4,$5)',[delivery.id,id,item.id,notification.id,item.content_version]);
         }
         await client.query('COMMIT');
       } catch(error){await client.query('ROLLBACK');throw error;}
@@ -74,8 +74,8 @@ class DeliveryWorker {
       FROM notification_delivery_items i JOIN notificaciones n ON n.id=i.notification_id AND n.tipo='email'
       JOIN noticias no ON no.id=i.noticia_id JOIN temas t ON t.id=no.tema_id AND t.activo=true
       JOIN preferencias_usuario_temas pt ON pt.usuario_id=i.usuario_id AND pt.tema_id=t.id
-      JOIN LATERAL (SELECT resultado FROM clasificacion_noticias WHERE noticia_id=no.id ORDER BY fecha_clasificacion DESC,id DESC LIMIT 1) c ON c.resultado='falsa'
-      WHERE i.delivery_id=$1 AND i.excluded=false ORDER BY i.id`,[delivery.id])).rows;
+      JOIN LATERAL (SELECT resultado FROM clasificacion_noticias WHERE noticia_id=no.id AND content_version=no.content_version ORDER BY fecha_clasificacion DESC,id DESC LIMIT 1) c ON c.resultado='falsa'
+      WHERE news_is_public(no) AND i.content_version=no.content_version AND i.delivery_id=$1 AND i.excluded=false ORDER BY i.id`,[delivery.id])).rows;
     return {user,items};
   }
   async deliver(client,delivery) {

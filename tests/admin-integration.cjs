@@ -4,7 +4,7 @@ const {Client}=require('../services/auth-service/node_modules/pg');
 const jwt=require('../services/auth-service/node_modules/jsonwebtoken');
 const bcrypt=require('../services/auth-service/node_modules/bcryptjs');
 const root=path.resolve(__dirname,'..'),instance=require('node:crypto').randomUUID();
-const database='admin_test_'+Date.now();const cfg={host:'127.0.0.1',port:55432,user:'phase00',password:'unused'};
+const database='admin_test_'+Date.now();const cfg={host:'127.0.0.1',port:Number(process.env.EDITORIAL_TEST_PORT||55432),user:'phase00',password:'unused'};
 const children=[];let checks=0;let db;let control;
 const secret='isolated-admin-test-only';
 const sessions=new Map(); const token=id=>sessions.get(id)||jwt.sign({id,rol:'admin'},secret,{expiresIn:'5m'});
@@ -14,7 +14,7 @@ async function free(port){await new Promise((resolve,reject)=>{const server=requ
  await free(13001);await free(13003);control=new Client({...cfg,database:'postgres'});await control.connect();
  const directory=(await control.query('SHOW data_directory')).rows[0].data_directory;
  assert.equal(path.resolve(directory).toLowerCase(),path.resolve(root,'../.healthcheck-logs/phase00-pg').toLowerCase());
- await control.query(`CREATE DATABASE ${database}`);db=new Client({...cfg,database});await db.connect();await db.query(fs.readFileSync(path.join(root,'db.sql'),'utf8'));await db.query('ALTER TABLE noticias ADD COLUMN fecha_analisis TIMESTAMP');await db.query("ALTER TYPE resultado_enum ADD VALUE 'dudosa'");
+ await control.query(`CREATE DATABASE ${database}`);db=new Client({...cfg,database});await db.connect();await db.query(fs.readFileSync(path.join(root,'db.sql'),'utf8'));await db.query("ALTER TABLE noticias ALTER COLUMN editorial_state SET DEFAULT 'published'; ALTER TABLE noticias ALTER COLUMN editorial_origin SET DEFAULT 'manual'; ALTER TABLE clasificacion_noticias ALTER COLUMN content_version SET DEFAULT 1");
  await db.query("INSERT INTO usuarios(id,nombre,email,rol,activo) VALUES (1,'Admin One','one@example.invalid','admin',true),(2,'Admin Two','two@example.invalid','admin',true),(3,'Normal','normal@example.invalid','usuario',true),(4,'Inactive','inactive@example.invalid','admin',false)");await db.query("SELECT setval('usuarios_id_seq',10)");
  await db.query("INSERT INTO fuentes(id,nombre,confiabilidad) VALUES(1,'Test source',0.8)");await db.query("SELECT setval('fuentes_id_seq',10)");
  await db.query("INSERT INTO noticias(id,titulo,contenido,fecha_publicacion,fuente_id) VALUES(1,'Unclassified','Test',NULL,1),(2,'Twice classified','Test','2026-10-05',1)");
@@ -48,7 +48,7 @@ async function free(port){await new Promise((resolve,reject)=>{const server=requ
  await request('news','news?startDate=2026-02-30',400);await request('news','news?limit=1000',400);await request('news','news?sort=id%3BDROP%20TABLE%20usuarios');
  const topic=await request('news','topics',201,{nombre:'Scratch topic',activo:false},'POST');await request('news',`topics/${topic.id}`,200,{activo:true},'PATCH');assert.equal((await request('news','topics?activo=true')).total,1);
  const source=await request('news','sources',201,{nombre:'Created source',url:'https://example.invalid/source',confiabilidad:0,verificada:false},'POST');assert.equal(Number(source.confiabilidad),0);await request('news',`sources/${source.id}`,200,{verificada:true},'PATCH');await request('news','sources',400,{nombre:'Unsafe',url:'javascript:alert(1)'},'POST');
- await Promise.all([request('news','reports/1',200,{estado:'revisado'},'PATCH'),request('news','reports/1',200,{estado:'revisado'},'PATCH')]);assert.equal(Number((await db.query('SELECT confiabilidad FROM fuentes WHERE id=1')).rows[0].confiabilidad),0.7);await request('news','reports/1',409,{estado:'desestimado'},'PATCH');
+ await Promise.all([request('news','reports/1',200,{estado:'revisado',resolution_note:'Checked source'},'PATCH'),request('news','reports/1',200,{estado:'revisado',resolution_note:'Checked source'},'PATCH')]);assert.equal(Number((await db.query('SELECT confiabilidad FROM fuentes WHERE id=1')).rows[0].confiabilidad),0.7);await request('news','reports/1',409,{estado:'desestimado',resolution_note:'Checked source'},'PATCH');
  await db.query("UPDATE usuarios SET rol='usuario' WHERE id=2");await request('news','summary',403,undefined,'GET',2);await request('auth','users',403,undefined,'GET',2);
  await db.query("UPDATE usuarios SET rol='admin' WHERE id=2");const responses=await Promise.all([fetch('http://127.0.0.1:13001/api/auth/admin/users/2',{method:'PATCH',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token(1)}`},body:JSON.stringify({rol:'usuario'})}),fetch('http://127.0.0.1:13001/api/auth/admin/users/1',{method:'PATCH',headers:{'Content-Type':'application/json',Authorization:`Bearer ${token(2)}`},body:JSON.stringify({rol:'usuario'})})]);assert.equal(responses.filter(r=>r.status===200).length,1);assert.equal((await db.query("SELECT count(*)::int AS n FROM usuarios WHERE activo=true AND rol='admin'")).rows[0].n,1);checks++;
  assert.equal((await db.query('SELECT count(*)::int AS n FROM preferencias_usuario')).rows[0].n,0);assert.equal((await db.query('SELECT count(*)::int AS n FROM noticias')).rows[0].n,2);

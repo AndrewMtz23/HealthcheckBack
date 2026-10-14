@@ -3,7 +3,7 @@ const {execFileSync}=require('node:child_process');
 const {Client,Pool}=require('../services/notification-service/node_modules/pg');
 const {DeliveryWorker}=require('../services/notification-service/src/services/delivery-worker');
 const root=path.resolve(__dirname,'..'),database='notifications_'+randomUUID().replaceAll('-','');
-const cfg={host:'127.0.0.1',port:55432,user:'phase00',password:'unused'};
+const cfg={host:'127.0.0.1',port:Number(process.env.EDITORIAL_TEST_PORT||55432),user:'phase00',password:'unused'};
 Object.assign(process.env,{DB_HOST:cfg.host,DB_PORT:String(cfg.port),DB_USER:cfg.user,DB_PASSWORD:cfg.password,DB_NAME:database,NODE_ENV:'test',JWT_SECRET:'synthetic-notification-history-secret',GOOGLE_CLIENT_ID:'',GOOGLE_CLIENT_SECRET:'',NOTIFICATION_DELIVERY_ENABLED:'false'});
 test('durable notification delivery with isolated PostgreSQL, controlled clock and simulated provider',async t=>{
  const control=new Client({...cfg,database:'postgres'});let pool,created=false,server,sequelize,restored=false;
@@ -13,6 +13,7 @@ test('durable notification delivery with isolated PostgreSQL, controlled clock a
   await control.connect();assert.equal(path.resolve((await control.query('SHOW data_directory')).rows[0].data_directory).toLowerCase(),path.resolve(root,'../.healthcheck-logs/phase00-pg').toLowerCase());
   await control.query(`CREATE DATABASE ${database}`);created=true;pool=new Pool({...cfg,database,max:6});
   await pool.query(fs.readFileSync(path.join(root,'db.sql'),'utf8'));
+  await pool.query("ALTER TABLE noticias ALTER COLUMN editorial_state SET DEFAULT 'published'; ALTER TABLE noticias ALTER COLUMN editorial_origin SET DEFAULT 'manual'; ALTER TABLE clasificacion_noticias ALTER COLUMN content_version SET DEFAULT 1");
   const express=require('../services/auth-service/node_modules/express');
   const passport=require('../services/auth-service/dist/config/passport').default;
   sequelize=require('../services/auth-service/dist/config/db').default;
