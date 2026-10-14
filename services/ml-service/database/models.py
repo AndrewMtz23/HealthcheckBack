@@ -30,6 +30,9 @@ class Noticia(Model):
     fuente_id = db.Column(db.Integer, db.ForeignKey('fuentes.id', ondelete='SET NULL'))
     tema_id = db.Column(db.Integer, db.ForeignKey('temas.id', ondelete='SET NULL'))
     fecha_analisis = db.Column(db.DateTime)
+    editorial_state = db.Column(db.String, nullable=False, default='draft', server_default='draft')
+    editorial_origin = db.Column(db.String, nullable=False, default='imported', server_default='imported')
+    content_version = db.Column(db.Integer, nullable=False, default=1, server_default='1')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime)
 
@@ -67,6 +70,7 @@ class ClasificacionNoticia(Model):
     resultado = db.Column(db.Enum('verdadera', 'falsa', 'dudosa', name='resultado_enum'), nullable=False)
     confianza = db.Column(db.Numeric(5, 2))
     explicacion = db.Column(db.Text)
+    content_version = db.Column(db.Integer)
     fecha_clasificacion = db.Column(db.DateTime, default=datetime.utcnow)
 
 

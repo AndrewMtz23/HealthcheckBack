@@ -1,3 +1,4 @@
+import {publicNews,isPublicNews} from '../editorial/policy';
 import { Request, Response } from 'express';
 import Interaction from '../models/Interaction';
 import News from '../models/News';
@@ -30,7 +31,7 @@ export const createOrUpdateInteraction = async (req: Request, res: Response): Pr
 
     // Validar que la noticia exista
     const noticia = await News.findByPk(noticia_id);
-    if (!noticia) {
+    if (!noticia || !isPublicNews(noticia.toJSON())) {
       res.status(404).json({
         status: 'error',
         message: 'Noticia no encontrada'
@@ -153,7 +154,7 @@ export const getUserInteractions = async (req: Request, res: Response): Promise<
         {
           model: News,
           as: 'noticia',
-          attributes: ['id', 'titulo', 'url', 'fecha_publicacion']
+          attributes: ['id', 'titulo', 'url', 'fecha_publicacion','editorial_state','editorial_origin','content_version']
         }
       ]
     });
@@ -164,7 +165,7 @@ export const getUserInteractions = async (req: Request, res: Response): Promise<
         total: count,
         currentPage: page,
         totalPages: Math.ceil(count / limit),
-        interactions: rows
+        interactions: rows.map(row=>{const r:any=row.toJSON();return {...r,noticia:r.noticia?publicNews(r.noticia):{available:false}};})
       }
     });
   } catch (error) {
@@ -192,6 +193,7 @@ export const getInteractionStatus = async (req: Request, res: Response): Promise
 
     const usuario_id = req.user.id;
     const noticia_id = parseInt(req.params.noticiaId);
+    const visible=await News.findByPk(noticia_id);if(!visible||!isPublicNews(visible.toJSON())){res.status(404).json({status:'error',message:'Noticia no disponible'});return;}
 
     // Obtener todas las interacciones del usuario con esta noticia
     const interactions = await Interaction.findAll({
@@ -230,6 +232,7 @@ export const getInteractionStatus = async (req: Request, res: Response): Promise
 export const getInteractionCounts = async (req: Request, res: Response): Promise<void> => {
   try {
     const noticiaId = parseInt(req.params.noticiaId);
+    const visible=await News.findByPk(noticiaId);if(!visible||!isPublicNews(visible.toJSON())){res.status(404).json({status:'error',message:'Noticia no disponible'});return;}
 
     // Contar likes, dislikes y shares
     const [likesCount, dislikesCount, sharesCount] = await Promise.all([

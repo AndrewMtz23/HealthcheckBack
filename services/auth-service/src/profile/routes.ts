@@ -47,10 +47,13 @@ router.delete('/topics/:topicId',run(async(req,res)=>{
 router.get('/notifications',run(async(req,res)=>{
  const page=positive(req.query.page||1),limit=positive(req.query.limit||10);if(page>100000||limit>50)throw new ProfileError(400,'Paginación inválida');const values={id:idOf(req),limit,offset:(page-1)*limit};
  const delivery=await notificationDelivery();
+ const visible=delivery.schema_ready?'(news_is_public(no) AND (di.notification_id IS NULL OR di.content_version=no.content_version))':'news_is_public(no)';
  const state=delivery.schema_ready?"CASE WHEN n.tipo='sms' THEN 'retired' WHEN di.excluded THEN 'cancelled' WHEN d.id IS NOT NULL THEN d.state WHEN n.enviada THEN 'sent' ELSE 'legacy' END":"CASE WHEN n.tipo='sms' THEN 'retired' WHEN n.enviada THEN 'sent' ELSE 'legacy' END";
  const extra=delivery.schema_ready?'d.attempts,d.error_code,d.available_at AS next_attempt_at':"NULL::int AS attempts,NULL::text AS error_code,NULL::timestamptz AS next_attempt_at";
  const joins=delivery.schema_ready?'LEFT JOIN notification_delivery_items di ON di.notification_id=n.id AND di.usuario_id=n.usuario_id LEFT JOIN notification_deliveries d ON d.id=di.delivery_id AND d.usuario_id=n.usuario_id':'';
- const [items,total]=await Promise.all([query(`SELECT n.id,n.titulo,n.mensaje,n.tipo,n.enviada,n.fecha_creacion,n.fecha_envio,n.noticia_id,no.titulo AS noticia_titulo,${state} AS delivery_state,${extra} FROM notificaciones n LEFT JOIN noticias no ON no.id=n.noticia_id ${joins} WHERE n.usuario_id=:id ORDER BY n.fecha_creacion DESC,n.id DESC LIMIT :limit OFFSET :offset`,values),query('SELECT count(*)::int AS total FROM notificaciones WHERE usuario_id=:id',values)]);
+ const [items,total]=await Promise.all([query(`SELECT n.id,CASE WHEN n.noticia_id IS NULL OR ${visible} THEN n.titulo ELSE 'Noticia no disponible' END AS titulo,
+ CASE WHEN n.noticia_id IS NULL OR ${visible} THEN n.mensaje ELSE '' END AS mensaje,n.tipo,n.enviada,n.fecha_creacion,n.fecha_envio,
+ CASE WHEN ${visible} THEN n.noticia_id ELSE NULL END AS noticia_id,CASE WHEN ${visible} THEN no.titulo ELSE NULL END AS noticia_titulo,${state} AS delivery_state,${extra} FROM notificaciones n LEFT JOIN noticias no ON no.id=n.noticia_id ${joins} WHERE n.usuario_id=:id ORDER BY n.fecha_creacion DESC,n.id DESC LIMIT :limit OFFSET :offset`,values),query('SELECT count(*)::int AS total FROM notificaciones WHERE usuario_id=:id',values)]);
  res.json({status:'success',data:{items,total:total[0].total,page,totalPages:Math.ceil(total[0].total/limit),...delivery}});
 }));
 router.delete('/notifications/:notificationId',run(async(req,res)=>{const rows=await query('DELETE FROM notificaciones WHERE id=:notificationId AND usuario_id=:id RETURNING id',{notificationId:positive(req.params.notificationId),id:idOf(req)});if(!rows.length)throw new ProfileError(404,'Notificación no encontrada');res.json({status:'success',data:{deleted:true}});}));

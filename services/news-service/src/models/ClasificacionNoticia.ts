@@ -54,6 +54,7 @@ ClasificacionNoticia.init(
       type: DataTypes.TEXT,
       allowNull: true,
     },
+    content_version: {type: DataTypes.INTEGER},
     fecha_clasificacion: {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW,

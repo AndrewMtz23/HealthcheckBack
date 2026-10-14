@@ -1,3 +1,4 @@
+import {publicNews,isPublicNews} from '../editorial/policy';
 import { Request, Response } from 'express';
 import { Op, literal } from 'sequelize';
 import {parseQuery,AdminError} from '../admin/query';
@@ -50,7 +51,7 @@ export const getUserHistory = async (req: Request, res: Response): Promise<void>
         {
           model: News,
           as: 'noticia',
-          attributes: ['id', 'titulo', 'contenido', 'url', 'fecha_publicacion'],
+          attributes: ['id', 'titulo', 'contenido', 'url', 'fecha_publicacion','editorial_state','editorial_origin','content_version','editorial_version','editorial_reviewed_version','editorial_reviewed_at'],
           include: [
             {
               model: Tema,
@@ -65,7 +66,7 @@ export const getUserHistory = async (req: Request, res: Response): Promise<void>
             {
               model: ClasificacionNoticia,
               as: 'clasificaciones',
-              attributes: ['resultado', 'confianza', 'fecha_clasificacion'],
+              attributes: ['id','resultado', 'confianza', 'fecha_clasificacion','content_version'],
               separate: true,
               limit: 1,
               order: [['fecha_clasificacion','DESC'],['id','DESC']],
@@ -85,7 +86,7 @@ export const getUserHistory = async (req: Request, res: Response): Promise<void>
         total: count,
         currentPage: page,
         totalPages: Math.ceil(count / limit),
-        history: rows
+        history: rows.map(row=>{const r:any=row.toJSON();return {...r,noticia:r.noticia?publicNews(r.noticia):{available:false}};})
       }
     });
   } catch (error) {

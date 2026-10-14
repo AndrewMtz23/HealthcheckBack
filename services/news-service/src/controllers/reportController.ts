@@ -1,3 +1,5 @@
+import {resolveReport} from '../admin/write';
+import {AdminError,positiveId} from '../admin/query';
 import { Request, Response } from 'express';
 import Report from '../models/Report';
 import Fuente from '../models/Fuente';
@@ -141,82 +143,10 @@ export const getReports = async (req: Request, res: Response): Promise<void> => 
  */
 export const updateReportStatus = async (req: Request, res: Response): Promise<void> => {
   try {
-    // Verificar que sea administrador
-    if (!req.user || req.user.rol !== 'admin') {
-      res.status(403).json({
-        status: 'error',
-        message: 'Acceso denegado'
-      });
-      return;
-    }
-
-    const { id } = req.params;
-    const { estado, comentario } = req.body;
-
-    // Validar estado
-    if (!['revisado', 'desestimado'].includes(estado)) {
-      res.status(400).json({
-        status: 'error',
-        message: 'Estado no válido'
-      });
-      return;
-    }
-
-    // Buscar el reporte
-    const report = await Report.findByPk(id);
-    if (!report) {
-      res.status(404).json({
-        status: 'error',
-        message: 'Reporte no encontrado'
-      });
-      return;
-    }
-
-    // Actualizar estado y fecha de revisión
-    const updateData: any = {
-      estado,
-      fecha_revision: new Date()
-    };
-    
-    // Añadir comentario si existe
-    if (comentario) {
-      updateData.comentario_admin = comentario;
-    }
-    
-    await Report.update(updateData, {
-      where: { id }
-    });
-    
-    // Recargar reporte con datos actualizados
-    const updatedReport = await Report.findByPk(id);
-
-    // Si el reporte fue revisado y validado, actualizar la confiabilidad de la fuente
-    if (estado === 'revisado') {
-      const fuente = await Fuente.findByPk(report.fuente_id);
-      if (fuente) {
-        // Reducir la confiabilidad de la fuente (ejemplo: reducir en un 10%)
-        const nuevaConfiabilidad = Math.max(0, Number(fuente.confiabilidad) - 0.1);
-        await Fuente.update(
-          { confiabilidad: nuevaConfiabilidad },
-          { where: { id: fuente.id } }
-        );
-      }
-    }
-
-    res.status(200).json({
-      status: 'success',
-      message: 'Estado del reporte actualizado correctamente',
-      data: {
-        report: updatedReport
-      }
-    });
-  } catch (error) {
-    console.error('Error al actualizar estado del reporte:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error al actualizar estado del reporte'
-    });
-  }
+    if(!req.user||req.user.rol!=='admin'){res.status(403).json({status:'error',message:'Acceso denegado'});return;}
+    const report=await resolveReport(positiveId(req.params.id),req.body.estado,req.user.id,req.body.resolution_note||req.body.comentario);
+    res.json({status:'success',data:{report}});
+  } catch(error){res.status(error instanceof AdminError?error.status:500).json({status:'error',message:error instanceof AdminError?error.message:'No se pudo resolver el reporte'});}
 };
 
 export default {

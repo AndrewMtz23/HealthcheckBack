@@ -11,6 +11,7 @@ router.use(['/inbox','/system-announcements'],authenticate);
 router.get('/inbox',run(async(req,res)=>{
  const page=Number(req.query.page||1),limit=Math.min(50,Number(req.query.limit||5));if(!Number.isSafeInteger(page)||page<1||page>100000||!Number.isSafeInteger(limit)||limit<1)throw new ProfileError(400,'Paginación inválida');const id=who(req);
  const delivery=await notificationDelivery();
+ const visible=delivery.schema_ready?'(news_is_public(no) AND (di.notification_id IS NULL OR di.content_version=no.content_version))':'news_is_public(no)';
  const deliveryState=delivery.schema_ready?"CASE WHEN n.tipo='sms' THEN 'retired' WHEN di.excluded THEN 'cancelled' WHEN d.id IS NOT NULL THEN d.state WHEN n.enviada THEN 'sent' ELSE 'legacy' END":"CASE WHEN n.tipo='sms' THEN 'retired' WHEN n.enviada THEN 'sent' ELSE 'legacy' END";
  const deliveryJoins=delivery.schema_ready?'LEFT JOIN notification_delivery_items di ON di.notification_id=n.id AND di.usuario_id=n.usuario_id LEFT JOIN notification_deliveries d ON d.id=di.delivery_id AND d.usuario_id=n.usuario_id':'';
  const items=await q(`SELECT * FROM (
@@ -18,7 +19,8 @@ router.get('/inbox',run(async(req,res)=>{
    FROM system_announcements a JOIN system_announcement_audience au ON au.announcement_id=a.id AND au.usuario_id=:id LEFT JOIN system_announcement_reads r ON r.announcement_id=a.id AND r.usuario_id=:id LEFT JOIN system_announcement_emails em ON em.announcement_id=a.id AND em.usuario_id=:id
    WHERE a.status IN ('published','expired') AND a.published_at>now()-interval '90 days' AND (a.expires_at IS NULL OR a.expires_at>now()-interval '90 days')
    UNION ALL
-   SELECT 'news'::text,n.id,n.titulo AS title,coalesce(left(no.contenido,10000),n.mensaje,'') AS body,'informativo'::text AS kind,n.fecha_creacion AT TIME ZONE 'UTC' AS created_at,NULL::timestamptz AS read_at,
+   SELECT 'news'::text,n.id,CASE WHEN n.noticia_id IS NULL OR ${visible} THEN n.titulo ELSE 'Noticia no disponible' END AS title,
+   CASE WHEN n.noticia_id IS NULL OR ${visible} THEN coalesce(left(no.contenido,10000),n.mensaje,'') ELSE '' END AS body,'informativo'::text AS kind,n.fecha_creacion AT TIME ZONE 'UTC' AS created_at,NULL::timestamptz AS read_at,
      ${deliveryState} AS delivery_state,NULL::timestamptz AS expires_at
    FROM notificaciones n LEFT JOIN noticias no ON no.id=n.noticia_id ${deliveryJoins} WHERE n.usuario_id=:id
  ) notices ORDER BY created_at DESC,id DESC LIMIT :limit OFFSET :offset`,{id,limit,offset:(page-1)*limit});

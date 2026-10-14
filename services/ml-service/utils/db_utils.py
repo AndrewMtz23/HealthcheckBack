@@ -1,7 +1,7 @@
 from database.db import db
 from database.models import Fuente, Noticia, ModeloML, ClasificacionNoticia, HistorialConsulta, Tema, Keyword, NoticiaKeyword
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import text as sql_text
+from sqlalchemy import text as sql_text, or_, and_
 from contextlib import contextmanager, nullcontext
 from threading import RLock
 from typing import cast
@@ -226,11 +226,12 @@ def get_active_model():
         logger.error(f"Error al obtener modelo activo: {str(e)}")
         raise
 
-def save_classification(noticia_id, modelo_id, resultado, confianza, explicacion):
+def save_classification(noticia_id, modelo_id, resultado, confianza, explicacion, content_version=1):
     """Guarda la clasificación en la BD usando SQLAlchemy."""
     try:
         nueva_clasificacion = ClasificacionNoticia(
             noticia_id=noticia_id,
+            content_version=content_version,
             modelo_id=modelo_id,
             resultado=resultado,
             confianza=confianza,
@@ -306,12 +307,20 @@ def analysis_transaction():
             raise
 
 
-def _find_analysis(url, contenido, modelo_id):
+def _find_analysis(url, contenido, modelo_id, usuario_id=None):
     query = db.session.query(Noticia, ClasificacionNoticia).join(
         ClasificacionNoticia, ClasificacionNoticia.noticia_id == Noticia.id
-    ).filter(ClasificacionNoticia.modelo_id == modelo_id)
+    ).filter(ClasificacionNoticia.modelo_id == modelo_id,
+             ClasificacionNoticia.content_version == Noticia.content_version,
+             or_(Noticia.editorial_state == 'published', and_(
+                 Noticia.editorial_state == 'draft', Noticia.editorial_origin == 'imported',
+                 db.session.query(HistorialConsulta.id).filter(
+                     HistorialConsulta.noticia_id == Noticia.id,
+                     HistorialConsulta.usuario_id == usuario_id).exists())))
     if url:
         query = query.filter(Noticia.url == url)
+        if contenido is not None:
+            query = query.filter(Noticia.contenido == contenido)
     else:
         query = query.filter(Noticia.url.is_(None), Noticia.contenido == contenido)
     return query.order_by(ClasificacionNoticia.fecha_clasificacion.desc(), ClasificacionNoticia.id.desc()).first()
@@ -346,7 +355,7 @@ def get_cached_analysis(url, contenido, modelo_id, usuario_id, check_deadline=No
     with analysis_transaction():
         if check_deadline:
             check_deadline()
-        found = _find_analysis(url, contenido, modelo_id)
+        found = _find_analysis(url, contenido, modelo_id, usuario_id)
         result = _analysis_result(found[0], found[1], usuario_id, True) if found else None
         if check_deadline:
             check_deadline()
@@ -362,7 +371,7 @@ def save_complete_analysis(titulo, contenido, url, fecha_publicacion, fuente_url
     with analysis_transaction():
         if check_deadline:
             check_deadline()
-        found = _find_analysis(url, contenido, modelo_id)
+        found = _find_analysis(url, contenido, modelo_id, usuario_id)
         if found:
             result = _analysis_result(found[0], found[1], usuario_id, True)
         else:
@@ -397,7 +406,7 @@ def save_complete_analysis(titulo, contenido, url, fecha_publicacion, fuente_url
                     keyword.relevancia = float(keyword.relevancia or 0) + 1.0
                 db.session.add(NoticiaKeyword(noticia_id=noticia.id, keyword_id=keyword.id))
             clasificacion = ClasificacionNoticia(noticia_id=noticia.id, modelo_id=modelo_id,
-                resultado=resultado, confianza=confianza, explicacion=explicacion)
+                resultado=resultado, confianza=confianza, explicacion=explicacion, content_version=noticia.content_version)
             db.session.add(clasificacion)
             db.session.flush()
             if fuente:
