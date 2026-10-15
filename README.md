@@ -270,3 +270,13 @@ Build auth/news/gateway before running `node --test tests/*.test.cjs`. The publi
 ## Actualización local — 2026-10-07
 
 Twilio retirado de notification-service. Las rutas HTTP heredadas de notificaciones están retiradas; usar las rutas autenticadas propias de Auth. Solo se aceptan nuevas preferencias email, sin convertir SMS existentes. Historial corregido: conteo, última clasificación, fechas y paginación. Ver `../Docs/User/verificacion.md` (local). Sin Prisma ni cambios de esquema en esta entrega.
+
+## GitHub Actions
+
+`ci.yml` runs on pull requests to `main`, pushes to `main` and feature/chore branches, and manual dispatch. Node service builds and regressions, Python offline route/ORM tests, and Go formatting/vet/race/build with disposable PostgreSQL 17.
+
+`codeql.yml` analyzes the repository languages and GitHub Actions on the same events and weekly after integration into the default branch. Official actions are pinned to commit SHAs; CI has read-only repository permissions, dependency caches, timeouts and cancellation of superseded runs. CodeQL has permission to upload security findings.
+
+The workflows do not deploy, use application credentials, train models or send notifications. Existing lint warnings remain visible; errors fail the job.
+
+Python CI installs CPU-only PyTorch plus `services/ml-service/requirements-ci.txt`, constrained to runtime versions. It does not fetch BERT weights. Monitor integration uses a disposable `link_monitor_test_ci` database and a matching PGDATA suffix so the destructive-test safeguards stay enabled; no application database is involved.
