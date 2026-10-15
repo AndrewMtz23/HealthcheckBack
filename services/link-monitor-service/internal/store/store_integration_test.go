@@ -162,3 +162,38 @@ func TestEmptyAndRecovery(t *testing.T) {
 		t.Fatalf("%+v %v", current, e)
 	}
 }
+
+func TestLostLeaseCannotReconcileNewOwner(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	_, e := s.StartRun(ctx, 1)
+	if e != nil {
+		t.Fatal(e)
+	}
+	old, e := s.AcquireLease(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer old.Close(ctx)
+	pid := old.conn.Conn().PgConn().PID()
+	var terminated bool
+	if e = s.pool.QueryRow(ctx, "SELECT pg_terminate_backend($1,1000)", pid).Scan(&terminated); e != nil || !terminated {
+		t.Fatal("terminate failed", e)
+	}
+	fresh, e := s.AcquireLease(ctx)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer fresh.Close(ctx)
+	run, e := fresh.RecoverAndClaim(ctx)
+	if e != nil || run == nil {
+		t.Fatal("claim failed", e)
+	}
+	if _, e = old.RecoverAndClaim(ctx); e == nil {
+		t.Fatal("lost owner reconciled new run")
+	}
+	current, e := s.CurrentRun(ctx)
+	if e != nil || current.State != "running" || current.ID != run.ID {
+		t.Fatalf("%+v %v", current, e)
+	}
+}

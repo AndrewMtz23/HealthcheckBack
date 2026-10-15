@@ -78,13 +78,9 @@ func (w *Worker) Run(ctx context.Context) error {
 			continue
 		}
 		// Only the holder may reconcile a previously interrupted process.
-		e = w.store.InterruptAbandoned(ctx)
-		if e == nil {
-			var run *store.Run
-			run, e = w.store.ClaimQueued(ctx)
-			if e == nil && run != nil {
-				e = w.runLeased(ctx, lease, run.ID)
-			}
+		run, claimErr := lease.RecoverAndClaim(ctx)
+		if claimErr == nil && run != nil {
+			e = w.runLeased(ctx, lease, run.ID)
 		}
 		closeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		lease.Close(closeCtx)

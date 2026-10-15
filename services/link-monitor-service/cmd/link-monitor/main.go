@@ -29,33 +29,11 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	// pgx parses PostgreSQL's standard TLS options; map application DB variables separately.
-	pc, e := pgxpool.ParseConfig("")
+	pc, e := config.DatabaseConfig(cfg.Concurrency)
 	if e != nil {
 		return e
 	}
-	if v := os.Getenv("DB_HOST"); v != "" {
-		pc.ConnConfig.Host = v
-	}
-	if v := os.Getenv("DB_NAME"); v != "" {
-		pc.ConnConfig.Database = v
-	}
-	if v := os.Getenv("DB_USER"); v != "" {
-		pc.ConnConfig.User = v
-	}
-	if v := os.Getenv("DB_PASSWORD"); v != "" {
-		pc.ConnConfig.Password = v
-	}
-	if v := os.Getenv("DB_PORT"); v != "" {
-		p, err := strconv.ParseUint(v, 10, 16)
-		if err != nil || p == 0 {
-			return errors.New("invalid DB_PORT")
-		}
-		pc.ConnConfig.Port = uint16(p)
-	}
-	pc.MaxConns = int32(cfg.Concurrency + 4)
 	pc.ConnConfig.ConnectTimeout = 3 * time.Second
-	pc.ConnConfig.RuntimeParams["statement_timeout"] = "10000"
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 	pool, e := pgxpool.NewWithConfig(ctx, pc)

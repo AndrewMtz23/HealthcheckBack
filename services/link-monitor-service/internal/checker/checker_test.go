@@ -104,3 +104,54 @@ func TestTimeout(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+type countingBody struct {
+	read   int
+	closed bool
+}
+
+func (b *countingBody) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 'x'
+	}
+	b.read += len(p)
+	return len(p), nil
+}
+func (b *countingBody) Close() error { b.closed = true; return nil }
+func TestBodyIsBoundedAndClosed(t *testing.T) {
+	body := &countingBody{}
+	c := New(Options{})
+	c.transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 200, Body: body, Header: make(http.Header), Request: r}, nil
+	})
+	result := c.Check(context.Background(), "http://example.com")
+	if result.Status != "available" || body.read != 65536 || !body.closed {
+		t.Fatalf("%+v read=%d closed=%v", result, body.read, body.closed)
+	}
+}
+
+func TestRedirectToPrivateNeverDialsPrivateAddress(t *testing.T) {
+	// A public-origin response redirects to a private address; only the first
+	// connection is made. The dialer is the sole injected network boundary.
+	var dials int
+	c := New(Options{Lookup: func(_ context.Context, host string) ([]net.IPAddr, error) {
+		if ip := net.ParseIP(host); ip != nil {
+			return []net.IPAddr{{IP: ip}}, nil
+		}
+		return []net.IPAddr{{IP: net.ParseIP("8.8.8.8")}}, nil
+	}, Dial: func(_ context.Context, _ string, _ string) (net.Conn, error) {
+		dials++
+		client, server := net.Pipe()
+		go func() {
+			defer server.Close()
+			buf := make([]byte, 4096)
+			server.Read(buf)
+			io.WriteString(server, "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1/private\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+		}()
+		return client, nil
+	}})
+	result := c.Check(context.Background(), "http://public.example")
+	if dials != 1 || result.Status != "uncheckable" || result.ErrorCode != "UNSAFE_DESTINATION" {
+		t.Fatalf("%+v dials=%d", result, dials)
+	}
+}

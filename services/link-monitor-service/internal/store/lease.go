@@ -2,10 +2,33 @@ package store
 
 import (
 	"context"
+	"errors"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Lease struct{ conn *pgxpool.Conn }
+
+// Recovery must use the locked session: a disconnected former owner cannot
+// mutate a successor's job through an unrelated pooled connection.
+func (l *Lease) RecoverAndClaim(ctx context.Context) (*Run, error) {
+	tx, e := l.conn.Begin(ctx)
+	if e != nil {
+		return nil, e
+	}
+	defer tx.Rollback(context.Background())
+	if _, e = tx.Exec(ctx, `UPDATE link_monitor_runs SET state='interrupted',error_code='WORKER_INTERRUPTED',finished_at=clock_timestamp() WHERE state='running'`); e != nil {
+		return nil, e
+	}
+	run, e := scanRun(tx.QueryRow(ctx, `UPDATE link_monitor_runs SET state='running',started_at=clock_timestamp(),heartbeat_at=clock_timestamp() WHERE state='queued' RETURNING `+runColumns))
+	if errors.Is(e, pgx.ErrNoRows) {
+		return nil, tx.Commit(ctx)
+	}
+	if e != nil {
+		return nil, e
+	}
+	return run, tx.Commit(ctx)
+}
 
 func (s *Store) AcquireLease(ctx context.Context) (*Lease, error) {
 	c, e := s.pool.Acquire(ctx)
