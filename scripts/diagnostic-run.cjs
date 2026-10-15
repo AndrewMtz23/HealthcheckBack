@@ -12,9 +12,7 @@ const env={...process.env,...e,HEALTHCHECK_DIAGNOSTIC:'1',PGOPTIONS:'-c default_
 env.RECOVERY_MAIL_ENABLED='false';
 // Approved administrative actions also write through news. External guards remain.
 if(name==='auth'||name==='news')env.PGOPTIONS='-c default_transaction_read_only=off -c statement_timeout=10000';
-if(name==='frontend')env.NODE_ENV='development';
-env.LINK_MONITOR_URL='http://127.0.0.1:3005';
-env.LINK_MONITOR_INTERNAL_TOKEN='phase00-link-monitor-diagnostic-only';
+Object.assign(env,require('./local-service-env.cjs').localServiceEnv(name));
 const exe=name==='link-monitor'?require('./link-monitor-run.cjs').launchDefinition(root,env,true).exe:name==='ml'?path.join(cwd,'.venv/Scripts/python.exe'):process.execPath;
 const child=spawn(exe,args,{cwd,env,stdio:'inherit',windowsHide:true});
 child.on('error',()=>{console.error('Diagnostic child could not start');process.exitCode=1;});

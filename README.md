@@ -4,7 +4,7 @@
 
 HealthCheck helps users examine health-related news by classifying article text, collecting source information, and keeping a history of their consultations. This repository contains the API gateway and backend services; the web frontend is maintained separately.
 
-The backend combines Node.js services for application features with a Python service for machine learning, article extraction, and a search-assisted chatbot. PostgreSQL stores users, articles, classifications, model metadata, and notification preferences.
+The backend combines Node.js application services, a Python service for machine learning and article extraction, and a Go service for manual link monitoring. PostgreSQL stores users, articles, classifications, model metadata, and notification preferences.
 
 ## Capabilities
 
@@ -12,7 +12,8 @@ The backend combines Node.js services for application features with a Python ser
 - **News management:** browse and search articles, manage sources and topics, record interactions, and submit reports.
 - **User accounts:** register, sign in with JWT authentication or Google OAuth, and manage profiles.
 - **Consultation history:** retrieve and delete a user's previous consultations.
-- **Notifications:** deliver email and SMS alerts based on topics and user preferences.
+- **Notifications:** email delivery and scheduled site announcements; SMS and legacy notification HTTP routes are retired.
+- **Link monitoring:** administrators manually check original article URLs, follow progress, and review persisted availability results through the Go service.
 - **Model management:** train models, list versions, and select an active model.
 - **Content collection:** collect Google News articles and X/Twitter posts through scraper endpoints and scheduled jobs.
 - **Conversational assistance:** investigate news with a LangChain chatbot connected to OpenAI and Google Custom Search.
@@ -34,7 +35,10 @@ flowchart LR
     Notifications --> DB
     ML --> BERT[Local BERT model]
     ML --> Search[OpenAI / Google Search]
-    Notifications --> Delivery[SMTP / Twilio]
+    Notifications --> Delivery[SMTP]
+    News --> Monitor[Link monitor / Go]
+    Monitor --> DB
+    Monitor --> Sources[Public article URLs]
 ```
 
 | Component | Stack | Local port | Purpose |
@@ -42,10 +46,11 @@ flowchart LR
 | API gateway | Express, TypeScript | `4000` | Forwarding, authentication checks, rate limiting |
 | Authentication | Express, Passport, Sequelize | `3001` | Accounts, JWT, Google OAuth |
 | News | Express, Sequelize, TypeScript | `3003` | Articles, search, reports, statistics, history |
-| Notifications | Express, Nodemailer, Twilio | `3004`* | Email, SMS, preferences, scheduled delivery |
+| Notifications | Express, Nodemailer | `3004` | Email worker and site announcements; preferences are owned by Auth |
 | Machine learning | Flask, PyTorch, Transformers, LangChain | `5000` | Classification, training, scraping, chatbot |
+| [Link monitor](services/link-monitor-service/README.md) | Go, pgx | `3005` | Manual URL checks, progress, results, recovery |
 
-*Notifications now defaults to `3004`, matching the gateway; `PORT` can override it.*
+The frontend runs on `3000`. News validates sessions through Auth and calls the monitor internally using `LINK_MONITOR_URL` and a shared server-only token. The browser never calls Go directly.
 
 ## Repository layout
 
@@ -71,9 +76,9 @@ HealthcheckBack/
 
 ### 1. Prerequisites
 
-Install Git with Git LFS, Node.js with npm, Python with pip and virtual environment support, and PostgreSQL. Runtime versions are not pinned at repository level. Python dependencies are pinned in [requirements.txt](services/ml-service/requirements.txt), and Node.js services include npm lockfiles.
+Install Git with Git LFS, Node.js with npm, Python with pip and virtual environment support, PostgreSQL, and Go 1.25 or newer (the monitor module declares its minimum version). Runtime versions are not pinned at repository level. Python dependencies are pinned in [requirements.txt](services/ml-service/requirements.txt), and Node.js services include npm lockfiles.
 
-External integrations use Google OAuth, OpenAI, Google Custom Search, SMTP, and Twilio. Configure credentials for the services you start; some clients, including the ML chatbot, are initialized at startup.
+External integrations use Google OAuth, OpenAI, Google Custom Search, and SMTP. Twilio is no longer required. Configure credentials for the services you start; some clients, including the ML chatbot, are initialized at startup.
 
 ### 2. Clone and download model weights
 
@@ -102,7 +107,7 @@ Use an empty database: the SQL file creates types and tables and is not a repeat
 
 Create a `.env` file inside each service directory and inside `api-gateway/`. These files are ignored by Git.
 
-Authentication, news, notifications, and ML share these database settings:
+Authentication, news, notifications, ML, and the Go monitor use the same application database settings:
 
 ```dotenv
 DB_HOST=localhost
@@ -116,13 +121,29 @@ Additional settings are listed below. Follow the source links for the configurat
 
 | Service | Settings |
 | --- | --- |
-| [Gateway](api-gateway/src/config/index.ts) | `PORT=4000`, `JWT_SECRET`, `ALLOWED_ORIGINS=http://localhost:3000`, `AUTH_SERVICE_URL=http://localhost:3001/api`, `ML_SERVICE_URL=http://localhost:5000/api`, `NOTIFICATIONS_SERVICE_URL=http://localhost:3004/api` |
+| [Gateway](api-gateway/src/config/index.ts) | `PORT=4000`, `JWT_SECRET`, `ALLOWED_ORIGINS=http://localhost:3000`, `AUTH_SERVICE_URL=http://localhost:3001`, `ML_SERVICE_URL=http://localhost:5000`, `NOTIFICATIONS_SERVICE_URL=http://localhost:3004` |
 | [Authentication](services/auth-service/src/config/env.ts) | `PORT=3001`, `JWT_SECRET`, `JWT_EXPIRATION=86400`, `FRONTEND_URL=http://localhost:3000`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL=http://localhost:3001/api/auth/google/callback` |
-| [News](services/news-service/src/config/index.ts) | `PORT=3003`, `JWT_SECRET`, `FRONTEND_URL=http://localhost:3000` |
-| [Notifications](services/notification-service/src/config/) | `PORT=3004`, `FRONTEND_URL=http://localhost:3000`, `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_SECURE`, `EMAIL_USER`, `EMAIL_PASS`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` |
+| [News](services/news-service/src/config/index.ts) | `PORT=3003`, `JWT_SECRET`, `FRONTEND_URL=http://localhost:3000`, `AUTH_SERVICE_URL=http://localhost:3001`, `LINK_MONITOR_URL=http://127.0.0.1:3005`, `LINK_MONITOR_INTERNAL_TOKEN` |
+| [Notifications](services/notification-service/src/config/) | `PORT=3004`, `FRONTEND_URL=http://localhost:3000`, `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_SECURE`, `EMAIL_USER`, `EMAIL_PASS` |
 | [ML](services/ml-service/config.py) | `SECRET_KEY`, `MODEL_PATH=models/bert_health_model`; chatbot: `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_CX` |
 
 Use the same `JWT_SECRET` in the gateway, authentication, and news services. Register the configured Google callback URL in your OAuth application. The ML development server uses port `5000` in `app.py`.
+
+### Start all services from the shared Windows workspace
+
+When this repository and `HealthcheckFront` are siblings, use `../iniciar-healthcheck.bat`. It starts **seven processes**: frontend, gateway, auth, news, notifications, ML and link monitor. The root BAT/scripts are workspace files, not included when cloning this repository alone.
+
+```bat
+iniciar-healthcheck.bat --preview
+iniciar-healthcheck.bat --check
+iniciar-healthcheck.bat
+```
+
+`--preview` prints ports and connections without starting anything. `--check` validates installed dependencies, the local diagnostic DB configuration, Go and free ports; it does not install, compile or send requests to providers. Default startup and `--diagnostic` compile TypeScript/Go and open the seven service terminals. All use the protected local topology from `scripts/local-service-env.cjs` and the DB settings in ignored `.env.phase00`.
+
+The protected launcher overrides browser API URLs to `http://localhost:4000/api` and `http://localhost:3003/api`. News and Go share a diagnostic-only internal token. It keeps external mail, ML operations and link checks disabled. A running monitor can report health 503 until its migration/configuration is ready; that is reported as degraded, not as a successful link check.
+
+For normal manual monitoring, apply `services/link-monitor-service/sql/001_link_monitor.sql` explicitly to the confirmed database, configure matching private tokens in News and Go, and run those services outside diagnostic mode. The migration is also required after creating a new database from `db.sql`. See the [monitor setup and API](services/link-monitor-service/README.md). Never apply `db.sql` to an existing populated database.
 
 ### 5. Start the Node.js services
 
