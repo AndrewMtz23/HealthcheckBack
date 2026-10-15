@@ -1,0 +1,24 @@
+# Offline route/ORM regression dependencies, using the runtime versions.
+# Install CPU torch first (see .github/workflows/ci.yml); no BERT weights needed.
+-c requirements.txt
+Flask
+Flask-SQLAlchemy
+SQLAlchemy
+python-dotenv
+psycopg2-binary
+torch
+transformers
+accelerate
+pandas
+scikit-learn
+scipy
+nltk
+newspaper3k
+lxml_html_clean
+beautifulsoup4
+urllib3
+requests
+langchain
+langchain-community
+langchain-openai
+schedule

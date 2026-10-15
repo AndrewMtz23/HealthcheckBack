@@ -4,6 +4,7 @@ import { AdminError, positiveId } from './query';
 import { sql, list, detail, summary } from './read';
 import { saveContent, resolveReport } from './write';
 import {createEditorialNews,updateEditorialNews,transitionEditorialNews} from '../editorial/service';
+import {linkMonitorRouter} from './linkMonitor';
 const router = Router();
 export const run = (fn: (req: Request, res: Response) => Promise<void>) => (req: Request, res: Response, next: NextFunction) => { fn(req, res).catch(next); };
 router.use(authenticate, async (req, res, next) => { try {
@@ -17,6 +18,7 @@ router.use(authenticate, async (req, res, next) => { try {
 catch (error) {
     next(error);
 } });
+router.use('/link-monitor',linkMonitorRouter);
 router.post('/news',run(async(req,res)=>{res.status(201).json({status:'success',data:await createEditorialNews(req.body,req.user!.id)});}));
 router.patch('/news/:id',run(async(req,res)=>{res.json({status:'success',data:await updateEditorialNews(positiveId(req.params.id),req.body,req.user!.id)});}));
 router.post('/news/:id/editorial',run(async(req,res)=>{res.json({status:'success',data:await transitionEditorialNews(positiveId(req.params.id),req.body,req.user!.id)});}));
