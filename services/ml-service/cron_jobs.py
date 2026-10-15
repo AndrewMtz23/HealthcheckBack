@@ -3,6 +3,7 @@ import time
 import threading
 import schedule
 import logging
+from scheduler_control import scheduler_enabled
 from scrapers.google_news import GoogleNewsScraper
 from scrapers.twitter_scraper import TwitterScraper
 
@@ -55,7 +56,8 @@ def run_scheduler(app):
 
 def start_scheduler(app):
     """Inicia el scheduler en un hilo separado"""
-    if os.environ.get('HEALTHCHECK_DIAGNOSTIC') == '1':
+    if not scheduler_enabled(os.environ):
+        logger.info("Scheduler de scraping desactivado; ML_SCHEDULER_ENABLED no está habilitado")
         return
     scheduler_thread = threading.Thread(target=run_scheduler, args=(app,))
     scheduler_thread.daemon = True  # El hilo se cerrará cuando termine el programa principal
