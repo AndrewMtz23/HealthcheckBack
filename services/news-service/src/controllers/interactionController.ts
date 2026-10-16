@@ -1,3 +1,5 @@
+import sequelize from '../config/db';
+import {writeAudit} from '../audit/writer';
 import {publicNews,isPublicNews} from '../editorial/policy';
 import { Request, Response } from 'express';
 import Interaction from '../models/Interaction';
@@ -7,122 +9,32 @@ import News from '../models/News';
  * Crea o actualiza una interacción de usuario con una noticia
  */
 export const createOrUpdateInteraction = async (req: Request, res: Response): Promise<void> => {
-  try {
-    // Verificar autenticación
-    if (!req.user) {
-      res.status(401).json({
-        status: 'error',
-        message: 'Usuario no autenticado'
-      });
-      return;
-    }
-
-    const { noticia_id, tipo_interaccion } = req.body;
-    const usuario_id = req.user.id;
-
-    // Validar parámetros
-    if (!noticia_id || !tipo_interaccion) {
-      res.status(400).json({
-        status: 'error',
-        message: 'Se requiere noticia_id y tipo_interaccion'
-      });
-      return;
-    }
-
-    // Validar que la noticia exista
-    const noticia = await News.findByPk(noticia_id);
-    if (!noticia || !isPublicNews(noticia.toJSON())) {
-      res.status(404).json({
-        status: 'error',
-        message: 'Noticia no encontrada'
-      });
-      return;
-    }
-
-    // Validar tipo de interacción
-    if (!['marcar_confiable', 'marcar_dudosa', 'compartir'].includes(tipo_interaccion)) {
-      res.status(400).json({
-        status: 'error',
-        message: 'Tipo de interacción no válido'
-      });
-      return;
-    }
-
-    // Para compartir, verificar si ya existe una interacción previa
-    if (tipo_interaccion === 'compartir') {
-      const existingInteraction = await Interaction.findOne({
-        where: {
-          usuario_id,
-          noticia_id,
-          tipo_interaccion: 'compartir'
-        }
-      });
-
-      // Si ya existe una interacción de compartir, no hacer nada
-      if (existingInteraction) {
-        res.status(200).json({
-          status: 'success',
-          message: 'Compartido previamente',
-          action: 'already_shared'
-        });
-        return;
-      }
-    }
-
-    // Resto del código para otras interacciones (marcar_confiable, marcar_dudosa)
-    const existingInteraction = await Interaction.findOne({
-      where: {
-        usuario_id,
-        noticia_id,
-        tipo_interaccion
-      }
-    });
-
-    // Si ya existe esta interacción exacta y no es "compartir", eliminarla (toggle)
-    if (existingInteraction && tipo_interaccion !== 'compartir') {
-      await existingInteraction.destroy();
-      
-      res.status(200).json({
-        status: 'success',
-        message: 'Interacción eliminada correctamente',
-        action: 'removed'
-      });
-      return;
-    }
-
-    // Si es una interacción de valoración (confiable/dudosa), eliminar la opuesta si existe
-    if (tipo_interaccion === 'marcar_confiable' || tipo_interaccion === 'marcar_dudosa') {
-      const oppositeType = tipo_interaccion === 'marcar_confiable' ? 'marcar_dudosa' : 'marcar_confiable';
-      
-      await Interaction.destroy({
-        where: {
-          usuario_id,
-          noticia_id,
-          tipo_interaccion: oppositeType
-        }
-      });
-    }
-
-    // Crear nueva interacción
-    const interaction = await Interaction.create({
-      usuario_id,
-      noticia_id,
-      tipo_interaccion
-    });
-
-    res.status(201).json({
-      status: 'success',
-      message: 'Interacción registrada correctamente',
-      data: { interaction },
-      action: 'created'
-    });
-  } catch (error) {
-    console.error('Error al gestionar interacción:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Error al procesar la interacción'
-    });
+ try {
+  if(!req.user){res.status(401).json({status:'error',message:'Usuario no autenticado'});return;}
+  const actor=req.user,noticia_id=Number(req.body.noticia_id),tipo_interaccion=req.body.tipo_interaccion;
+  if(!Number.isSafeInteger(noticia_id)||noticia_id<1||!['marcar_confiable','marcar_dudosa','compartir'].includes(tipo_interaccion)){
+   res.status(400).json({status:'error',message:'Datos de interaccion invalidos'});return;
   }
+  const result=await sequelize.transaction(async transaction=>{
+   // Serialize toggles and repeated shares for this user/news pair.
+   await sequelize.query('SELECT pg_advisory_xact_lock(:user,:news)',{replacements:{user:actor.id,news:noticia_id},transaction});
+   const news=await News.findByPk(noticia_id,{transaction,lock:transaction.LOCK.SHARE});
+   if(!news||!isPublicNews(news.toJSON()))return null;
+   const existing=await Interaction.findOne({where:{usuario_id:actor.id,noticia_id,tipo_interaccion},transaction});
+   if(existing&&tipo_interaccion==='compartir')return {action:'already_shared'};
+   if(existing){
+    await existing.destroy({transaction});
+    await writeAudit(req,actor,'NEWS_INTERACTION',noticia_id,{interaction:tipo_interaccion,selected:false},transaction);
+    return {action:'removed'};
+   }
+   if(tipo_interaccion!=='compartir')await Interaction.destroy({where:{usuario_id:actor.id,noticia_id,tipo_interaccion:tipo_interaccion==='marcar_confiable'?'marcar_dudosa':'marcar_confiable'},transaction});
+   const interaction=await Interaction.create({usuario_id:actor.id,noticia_id,tipo_interaccion},{transaction});
+   await writeAudit(req,actor,'NEWS_INTERACTION',noticia_id,{interaction:tipo_interaccion,selected:true},transaction,`interacciones_noticia:${interaction.id}`);
+   return {action:'created',data:{interaction}};
+  });
+  if(!result){res.status(404).json({status:'error',message:'Noticia no encontrada'});return;}
+  res.status(result.action==='created'?201:200).json({status:'success',...result});
+ }catch{res.status(500).json({status:'error',message:'No se pudo procesar la interaccion'});}
 };
 
 /**

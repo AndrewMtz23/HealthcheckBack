@@ -1,3 +1,5 @@
+import sequelize from '../config/db';
+import {writeAudit} from '../audit/writer';
 import { Request, Response } from 'express';
 import Tema from '../models/Tema';
 
@@ -42,11 +44,15 @@ export const createTema = async (req: Request, res: Response): Promise<void> => 
     }
 
     // Crear tema
-    const nuevoTema = await Tema.create({
+    const nuevoTema = await sequelize.transaction(async transaction=>{
+    const created=await Tema.create({
       nombre,
       descripcion: descripcion || null,
       palabras_clave: palabras_clave || null,
       activo: true
+    },{transaction});
+    await writeAudit(req,req.user!,'TOPIC_CREATE',created.id,{fields:Object.keys(req.body).filter(k=>['nombre','url','descripcion','confiabilidad','palabras_clave'].includes(k))},transaction);
+    return created;
     });
 
     res.status(201).json({
@@ -83,11 +89,14 @@ export const updateTema = async (req: Request, res: Response): Promise<void> => 
     }
 
     // Actualizar tema
+    await sequelize.transaction(async transaction=>{
     await tema.update({
       nombre: nombre || tema.nombre,
       descripcion: descripcion || tema.descripcion,
       palabras_clave: palabras_clave ?? tema.palabras_clave,
       activo: activo !== undefined ? activo : tema.activo
+    },{transaction});
+    await writeAudit(req,req.user!,'TOPIC_UPDATE',tema.id,{fields:Object.keys(req.body).filter(k=>['nombre','url','descripcion','confiabilidad','verificada','palabras_clave','activo'].includes(k))},transaction);
     });
 
     res.status(200).json({

@@ -1,3 +1,5 @@
+import {Request} from 'express';
+import {writeAudit} from '../audit/writer';
 import { QueryTypes, UniqueConstraintError } from 'sequelize';
 import sequelize from '../config/db';
 import { AdminError } from './query';
@@ -41,7 +43,7 @@ export function contentValues(section: string, body: any, create: boolean) {
         throw new AdminError(400, 'No hay cambios');
     return data;
 }
-export async function saveContent(section: string, id: number | null, body: any, actor: number) {
+export async function saveContent(section: string, id: number | null, body: any, actor: number, req?: Request) {
     if (!['sources', 'topics'].includes(section))
         throw new AdminError(404, 'Operación no disponible');
     const data = contentValues(section, body, id === null);
@@ -56,6 +58,7 @@ export async function saveContent(section: string, id: number | null, body: any,
             const rows = await sequelize.query(command, { replacements: { ...data, id }, type: QueryTypes.SELECT, transaction });
             if (!rows.length)
                 throw new AdminError(404, 'Registro no encontrado');
+            await writeAudit(req,{id:actor,rol:'admin'},`${section==='sources'?'SOURCE':'TOPIC'}_${id===null?'CREATE':'UPDATE'}`,(rows[0] as any).id,{fields:keys},transaction);
             return rows[0];
         });
     }
@@ -65,7 +68,7 @@ export async function saveContent(section: string, id: number | null, body: any,
         throw error;
     }
 }
-export async function resolveReport(id: number, estado: string, actor: number, note?: string) {
+export async function resolveReport(id: number, estado: string, actor: number, note?: string, req?: Request) {
     const resolution_note=reasonValue(note);
     if (!['revisado', 'desestimado'].includes(estado))
         throw new AdminError(400, 'Selecciona revisado o desestimado');
@@ -84,7 +87,8 @@ export async function resolveReport(id: number, estado: string, actor: number, n
         if (estado === 'revisado')
             await sequelize.query('UPDATE fuentes SET confiabilidad=GREATEST(0,confiabilidad-0.1),updated_at=now() WHERE id=:id', { replacements: { id: report.fuente_id }, transaction });
         const updated = await sequelize.query('UPDATE reportes_fuente SET estado=:estado,fecha_revision=now(),resolution_note=:resolution_note,resolved_by=:actor WHERE id=:id RETURNING *', { replacements: { id, estado, resolution_note, actor }, type: QueryTypes.SELECT, transaction });
-        await sequelize.query('INSERT INTO source_report_events(report_id,actor_id,state,note) VALUES(:id,:actor,:estado,:resolution_note)', {replacements:{id,actor,estado,resolution_note},transaction});
+        const events=await sequelize.query<any>('INSERT INTO source_report_events(report_id,actor_id,state,note) VALUES(:id,:actor,:estado,:resolution_note) RETURNING id', {replacements:{id,actor,estado,resolution_note},transaction,type:QueryTypes.SELECT});
+        await writeAudit(req,{id:actor,rol:'admin'},'REPORT_RESOLVE',id,{state:estado},transaction,`source_report_events:${events[0].id}`);
         return updated[0];
     });
 }
