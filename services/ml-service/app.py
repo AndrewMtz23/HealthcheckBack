@@ -1,5 +1,6 @@
 import os
 from flask import Flask, request, jsonify
+from api.health import health_bp
 from api.routes.classify_routes import classify_bp
 from api.routes.train_routes import train_bp
 from api.routes.chatbot_routes import chatbot_bp
@@ -16,7 +17,7 @@ CORS(app)
 @app.before_request
 def diagnostic_read_only():
     if os.environ.get('HEALTHCHECK_DIAGNOSTIC') == '1':
-        if request.method not in ('GET', 'HEAD') or request.path != '/api/ml/train/models':
+        if request.method not in ('GET', 'HEAD') or request.path not in ('/health', '/api/ml/train/models'):
             return jsonify({'error': 'Operation disabled in diagnostic mode'}), 503
 
 
@@ -27,6 +28,7 @@ app.config.from_object(Config)
 init_db(app)
 
 # Registrar los Blueprints
+app.register_blueprint(health_bp)
 app.register_blueprint(classify_bp, url_prefix="/api/ml/classify")
 app.register_blueprint(train_bp, url_prefix="/api/ml/train")
 app.register_blueprint(chatbot_bp, url_prefix="/api/ml/chatbot")
@@ -40,4 +42,4 @@ if __name__ == "__main__":
             # Load only on an authorized prediction request. Missing artifacts
             # produce a controlled 503 instead of preventing service startup.
             
-    app.run(host="0.0.0.0", port=5000, debug=os.environ.get('HEALTHCHECK_DIAGNOSTIC') != '1')
+    app.run(host="0.0.0.0", port=5000, debug=os.environ.get('HEALTHCHECK_DIAGNOSTIC') != '1' and os.environ.get('HEALTHCHECK_LOCAL_MANUAL') != '1')

@@ -10,7 +10,8 @@ class Safety(unittest.TestCase):
         class Threads:
             def Thread(self, **kwargs): raise AssertionError('scraper thread started')
         class Env: environ = {'HEALTHCHECK_DIAGNOSTIC': '1'}
-        ns = {'threading': Threads(), 'os': Env(), 'run_scheduler': lambda app: None}
+        from scheduler_control import scheduler_enabled
+        ns = {'threading': Threads(), 'os': Env(), 'run_scheduler': lambda app: None, 'scheduler_enabled': scheduler_enabled, 'logger': __import__('logging').getLogger(__name__)}
         exec(compile(ast.Module(body=[fn], type_ignores=[]), str(source), 'exec'), ns)
         ns['start_scheduler'](object())
 
@@ -27,6 +28,8 @@ class Safety(unittest.TestCase):
             ns['request'].path = endpoint
             self.assertEqual(ns['diagnostic_read_only']()[1], 503)
         ns['request'].method = 'GET'; ns['request'].path = '/api/ml/train/models'
+        self.assertIsNone(ns['diagnostic_read_only']())
+        ns['request'].path = '/health'
         self.assertIsNone(ns['diagnostic_read_only']())
 
     def test_ssrf_validator_blocks_internal_and_private_destinations(self):

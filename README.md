@@ -139,9 +139,11 @@ iniciar-healthcheck.bat --check
 iniciar-healthcheck.bat
 ```
 
-`--preview` prints ports and connections without starting anything. `--check` validates installed dependencies, the local diagnostic DB configuration, Go and free ports; it does not install, compile or send requests to providers. Default startup and `--diagnostic` compile TypeScript/Go and open the seven service terminals. All use the protected local topology from `scripts/local-service-env.cjs` and the DB settings in ignored `.env.phase00`.
+`--preview` prints ports and connections without starting anything. `--check` validates installed dependencies, local DB configuration, Go and free ports. Default startup compiles TypeScript/Go and opens seven terminals in local mode: manual ML predictions and link checks are enabled; email delivery and automatic scraping remain disabled. `--diagnostic` explicitly blocks predictions and new link checks.
 
-The protected launcher overrides browser API URLs to `http://localhost:4000/api` and `http://localhost:3003/api`. News and Go share a diagnostic-only internal token. It keeps external mail, ML operations and link checks disabled. A running monitor can report health 503 until its migration/configuration is ready; that is reported as degraded, not as a successful link check.
+Both modes use `scripts/local-service-env.cjs` and DB settings in ignored `.env.phase00`. Normal startup uses `scripts/local-run.cjs` and generates persistent private JWT, gateway/ML and News/Go secrets in ignored `.env.local-runtime`. Keep that file between restarts; replacing it invalidates existing sessions. Browser API URLs are `http://localhost:4000/api` and `http://localhost:3003/api`. The monitor reports health 503 until its schema/configuration is ready.
+
+ML requires a registered active model whose artifacts exist in `services/ml-service/models/model_<version>`; the original `bert_health_model` directory alone is not an active registry entry. Register only verified artifacts and do not invent evaluation metrics. Public ML `/health` reports process liveness; it does not authorize operations or guarantee model readiness.
 
 For normal manual monitoring, apply `services/link-monitor-service/sql/001_link_monitor.sql` explicitly to the confirmed database, configure matching private tokens in News and Go, and run those services outside diagnostic mode. The migration is also required after creating a new database from `db.sql`. See the [monitor setup and API](services/link-monitor-service/README.md). Never apply `db.sql` to an existing populated database.
 
@@ -280,3 +282,5 @@ Twilio retirado de notification-service. Las rutas HTTP heredadas de notificacio
 The workflows do not deploy, use application credentials, train models or send notifications. Existing lint warnings remain visible; errors fail the job.
 
 Python CI installs CPU-only PyTorch plus `services/ml-service/requirements-ci.txt`, constrained to runtime versions. It does not fetch BERT weights. Monitor integration uses a disposable `link_monitor_test_ci` database and a matching PGDATA suffix so the destructive-test safeguards stay enabled; no application database is involved.
+
+CI graph: Node compilation feeds regression tests through build artifacts; Go checks feed PostgreSQL integration and then binary compilation. Python regressions run independently.

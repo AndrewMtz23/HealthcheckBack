@@ -40,7 +40,7 @@ node ../../scripts/link-monitor-run.cjs
 
 En Windows, el BAT raíz del espacio de trabajo también lo compila e inicia junto con los otros seis procesos. `iniciar-healthcheck.bat --preview` muestra las conexiones y `--check` comprueba requisitos sin arrancar.
 
-El BAT usa diagnóstico, token sintético solo local y conexión de solo lectura para Go. `HEALTHCHECK_DIAGNOSTIC=1` permite consultas, pero bloquea nuevas ejecuciones y no recupera trabajos mediante escrituras. Para revisiones reales, News y Go deben ejecutarse fuera de diagnóstico con token privado y esquema instalado. No hay cron ni revisión automática al arrancar.
+El BAT inicia en modo local con un token privado compartido persistido en `.env.local-runtime`; permite revisiones manuales. La opción `--diagnostic` usa token sintético local y conexión de solo lectura. `HEALTHCHECK_DIAGNOSTIC=1` permite consultas, pero bloquea nuevas ejecuciones y no recupera trabajos mediante escrituras. Para revisiones reales, News y Go requieren el esquema instalado. No hay cron ni revisión automática al arrancar.
 
 ## API y recuperación
 
