@@ -17,6 +17,13 @@ CONNECT_TIMEOUT = 5.0
 READ_TIMEOUT = 10.0
 USER_AGENT = "HealthCheck-ArticleExtractor/1.0 (+http://localhost:3000)"
 
+
+class ArticleAccessDenied(ValueError):
+    """The public source refused access; do not treat this as an ML failure."""
+
+    def __init__(self):
+        super().__init__("The source refused automated access")
+
 def _assert_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> None:
     if not ip.is_global or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
         raise ValueError("Destination is not a public unicast address")
@@ -88,6 +95,8 @@ def safe_download_article(url: str) -> str:
                     raise ValueError("Invalid or excessive redirects")
                 current_url = urllib.parse.urljoin(current_url, location)
                 continue
+            if response.status in (401, 403):
+                raise ArticleAccessDenied()
             if not 200 <= response.status < 300:
                 raise ValueError("Remote server rejected the request")
             if response.headers.get('Content-Encoding', 'identity').lower() != 'identity':
@@ -170,6 +179,8 @@ def extract_news_data_safe(url: str) -> tuple[dict | None, str | None]:
             "Fecha de Publicación": publish_date
         }, None
 
+    except ArticleAccessDenied:
+        raise
     except TimeoutError:
         raise
     except ValueError as ve:
@@ -181,5 +192,8 @@ def extract_news_data_safe(url: str) -> tuple[dict | None, str | None]:
 
 def extract_news_data(url: str) -> dict | None:
     """Extrae el título, contenido, autor y fecha de publicación de una noticia desde una URL."""
-    data, _ = extract_news_data_safe(url)
-    return data
+    try:
+        data, _ = extract_news_data_safe(url)
+        return data
+    except ArticleAccessDenied:
+        return None

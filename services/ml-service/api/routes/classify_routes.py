@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, Response
 from core.classify_service import predict_news, prepare_model, ModelUnavailable
-from utils.article_extractor import extract_news_data, extract_news_data_safe
+from utils.article_extractor import ArticleAccessDenied, extract_news_data, extract_news_data_safe
 from utils.db_utils import (
     get_or_create_source, save_news, get_active_model, save_classification,
     save_consultation, classify_topic, extract_keywords, save_news_keywords,
@@ -110,6 +110,8 @@ def classify():
             resultado=resultado, confianza=confianza, explicacion=explicacion,
             usuario_id=usuario_id, check_deadline=check_deadline)
         return jsonify(analysis_response(saved)), 200
+    except ArticleAccessDenied:
+        return jsonify(error="El sitio restringe la descarga de esta noticia. Puedes copiar su contenido y pegarlo en la pestaña Texto para analizarlo.", code="SOURCE_ACCESS_DENIED"), 422
     except ModelUnavailable:
         return jsonify(error="El modelo de análisis no está disponible en este momento.", code="MODEL_UNAVAILABLE"), 503
     except TimeoutError:

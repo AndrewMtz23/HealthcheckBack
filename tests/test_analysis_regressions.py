@@ -148,6 +148,15 @@ class AnalysisRegression(unittest.TestCase):
         self.assertNotIn('synthetic persistence failure', response.get_data(as_text=True))
         self.assertEqual(self.counts(), before)
 
+    def test_source_access_denied_is_actionable_and_never_writes(self):
+        before = self.counts()
+        with patch.object(routes, 'extract_news_data_safe', side_effect=extractor.ArticleAccessDenied()):
+            response = self.post({'url': 'https://example.invalid/blocked'})
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json['code'], 'SOURCE_ACCESS_DENIED')
+        self.assertIn('Texto', response.json['error'])
+        self.assertEqual(self.counts(), before)
+
     def test_oversize_extracted_text_is_rejected_without_writes(self):
         with patch.object(routes, 'extract_news_data_safe', return_value=({'Texto Completo': 'a' * 50001}, None)):
             self.assertEqual(self.post({'url': 'https://example.invalid/news'}).status_code, 400)
@@ -193,6 +202,17 @@ class AnalysisRegression(unittest.TestCase):
 
 
 class DownloadRegression(unittest.TestCase):
+    def test_remote_access_denial_is_preserved_and_closes_connection(self):
+        for status in (401, 403):
+            response = self.response(status=status)
+            pool = Mock()
+            pool.request.return_value = response
+            with patch.object(extractor.socket, 'getaddrinfo', return_value=self.dns('93.184.216.34')), patch('urllib3.HTTPSConnectionPool', return_value=pool):
+                with self.assertRaises(extractor.ArticleAccessDenied):
+                    extractor.extract_news_data_safe('https://example.invalid/blocked')
+            response.close.assert_called_once()
+            pool.close.assert_called_once()
+
     def test_article_parser_does_not_fetch_embedded_internal_images(self):
         html = '<html><head><title>Synthetic news</title></head><body><article>' + \
             '<p>' + ('Synthetic health news with enough words for a full paragraph. ' * 30) + \
