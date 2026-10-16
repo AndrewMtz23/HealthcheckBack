@@ -5,6 +5,7 @@ import sequelize from '../config/db';
 import { authenticate } from '../middleware/auth';
 import { revokeUserSessions } from '../utils/sessions';
 import { AdminError, validateUser, protectAdmin } from './validation';
+import {audit} from '../audit/writer';
 const router = Router();
 const attributes = ['id', 'nombre', 'email', 'telefono', 'imagen_url', 'rol', 'activo', 'fecha_registro', 'ultima_conexion'];
 const run = (fn: (req: Request, res: Response) => Promise<void>) => (req: Request, res: Response, next: NextFunction) => { fn(req, res).catch(next); };
@@ -53,7 +54,15 @@ router.get('/', run(async (req, res) => {
     const { rows, count } = await User.findAndCountAll({ attributes, where, limit, offset: (page - 1) * limit, order: [[sort, sort === 'nombre' ? 'ASC' : 'DESC'], ['id', 'DESC']] });
     res.json({ status: 'success', data: { items: rows, total: count, page, limit, totalPages: Math.ceil(count / limit) } });
 }));
-router.post('/', run(async (req, res) => { const data = validateUser(req.body, true); const user = await User.create(data); res.status(201).json({ status: 'success', data: await User.findByPk(user.id, { attributes }) }); }));
+router.post('/', run(async (req, res) => {
+    const data = validateUser(req.body, true);
+    const user = await sequelize.transaction(async transaction => {
+        const created = await User.create(data, {transaction});
+        await audit(req, 'USER_CREATE', created.id, {fields:Object.keys(data)}, transaction);
+        return created;
+    });
+    res.status(201).json({ status: 'success', data: await User.findByPk(user.id, { attributes }) });
+}));
 router.patch('/:id', run(async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isSafeInteger(id) || id < 1)
@@ -69,6 +78,7 @@ router.patch('/:id', run(async (req, res) => {
             throw new AdminError(404, 'Usuario no encontrado');
         protectAdmin(actor.id, user, data, await User.count({ where: { rol: 'admin', activo: true }, transaction }));
         await user.update(data, { transaction });
+        await audit(req, data.rol !== undefined || data.activo !== undefined ? 'USER_ACCESS_CHANGE' : 'USER_UPDATE', id, {fields:Object.keys(data)}, transaction);
         if (data.activo === false || data.contrasena !== undefined) {
             transaction.afterCommit(() => { revokeUserSessions(id); });
         }

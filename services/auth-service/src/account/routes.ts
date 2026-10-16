@@ -8,6 +8,7 @@ import {createRecoveryMail, RecoveryMail} from './mail';
 import {digest, recoveryTokens, RecoveryTokens, RequestLimits, validPassword} from './security';
 import env from '../config/env';
 import {recoveryClient} from './clientIdentity';
+import {audit} from '../audit/writer';
 
 const credential = (user: User) => digest(JSON.stringify([user.contrasena, user.email, user.google_id]));
 const accepted = {status: 'success', message: 'Si la cuenta permite recuperar la contraseña, recibirás un enlace por correo. Revisa también spam. Si usas Google, recupera el acceso desde Google.'};
@@ -57,6 +58,7 @@ export function createRecoveryRouter(mail: RecoveryMail = createRecoveryMail(), 
         if (!user?.activo || !user.contrasena || credential(user) !== ticket.credential || ticket.expires <= Date.now()) return false;
         user.contrasena = req.body.contrasena;
         await user.save({transaction});
+        await audit(req, 'PASSWORD_RESET', user.id, {}, transaction, 'success', user);
         transaction.afterCommit(() => {revokeUserSessions(user.id);tokens.revoke(user.id);});
         return true;
       });
@@ -75,6 +77,7 @@ export function createRecoveryRouter(mail: RecoveryMail = createRecoveryMail(), 
         if (!user?.activo || !user.contrasena || !(await user.isValidPassword(req.body.actual))) return false;
         user.contrasena = req.body.contrasena;
         await user.save({transaction});
+        await audit(req, 'PASSWORD_CHANGE', user.id, {}, transaction);
         transaction.afterCommit(() => {revokeUserSessions(id);tokens.revoke(id);});
         return true;
       });
