@@ -284,3 +284,9 @@ The workflows do not deploy, use application credentials, train models or send n
 Python CI installs CPU-only PyTorch plus `services/ml-service/requirements-ci.txt`, constrained to runtime versions. It does not fetch BERT weights. Monitor integration uses a disposable `link_monitor_test_ci` database and a matching PGDATA suffix so the destructive-test safeguards stay enabled; no application database is involved.
 
 CI graph: Node compilation feeds regression tests through build artifacts; Go checks feed PostgreSQL integration and then binary compilation. Python regressions run independently.
+
+## Local schema and source access
+
+The notification center also requires `services/notification-service/sql/system-announcements.sql`. Apply this reviewed migration explicitly in a transaction after backing up the intended database; missing announcement tables cause inbox and active-announcement queries to fail. The startup launcher does not migrate schemas. This migration creates no announcements or email deliveries.
+
+Some article sources refuse automated downloads with HTTP 401/403. Prediction returns `422 SOURCE_ACCESS_DENIED` with guidance to use the Text tab in that case, preserving SSRF protection and access restrictions. This is distinct from an unavailable ML model and does not save a classification or history entry.
