@@ -1,3 +1,4 @@
+import {audit} from '../audit/writer';
 import { Router, Request, Response, NextFunction } from 'express';
 import { QueryTypes } from 'sequelize';
 import sequelize from '../config/db';
@@ -28,6 +29,16 @@ router.get('/inbox',run(async(req,res)=>{
  res.json({status:'success',data:{items,total:totals[0].total,page,totalPages:Math.ceil(totals[0].total/limit),unread_count:totals[0].unread_count}});
 }));
 router.get('/system-announcements/active',run(async(req,res)=>{const items=await q(`SELECT a.id,a.title,a.body,a.kind,a.published_at AS created_at,a.maintenance_start_at,a.maintenance_end_at FROM system_announcements a JOIN system_announcement_audience au ON au.announcement_id=a.id AND au.usuario_id=:id WHERE a.status='published' AND a.kind='mantenimiento' AND a.maintenance_start_at<=now() AND a.maintenance_end_at>now() AND (a.expires_at IS NULL OR a.expires_at>now()) ORDER BY a.maintenance_start_at`,{id:who(req)});res.json({status:'success',data:items});}));
-router.post('/system-announcements/:id/read',run(async(req,res)=>{const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw new ProfileError(400,'ID inválido');const rows=await q(`INSERT INTO system_announcement_reads(announcement_id,usuario_id) SELECT a.id,:userId FROM system_announcements a JOIN system_announcement_audience au ON au.announcement_id=a.id AND au.usuario_id=:userId WHERE a.id=:id AND a.status IN ('published','expired') ON CONFLICT(announcement_id,usuario_id) DO UPDATE SET read_at=system_announcement_reads.read_at RETURNING read_at`,{id,userId:who(req)});if(!rows.length)throw new ProfileError(404,'Aviso no encontrado');res.json({status:'success',data:{read_at:rows[0].read_at}});}));
+router.post('/system-announcements/:id/read',run(async(req,res)=>{
+ const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw new ProfileError(400,'ID invalido');
+ const rows=await sequelize.transaction(async transaction=>{
+  const options={replacements:{id,userId:who(req)},transaction,type:QueryTypes.SELECT as const};
+  const inserted=await sequelize.query<any>(`INSERT INTO system_announcement_reads(announcement_id,usuario_id) SELECT a.id,:userId FROM system_announcements a JOIN system_announcement_audience au ON au.announcement_id=a.id AND au.usuario_id=:userId WHERE a.id=:id AND a.status IN ('published','expired') ON CONFLICT(announcement_id,usuario_id) DO NOTHING RETURNING read_at`,options);
+  if(inserted.length){await audit(req,'NOTIFICATION_READ',id,{source:'system'},transaction);return inserted;}
+  return sequelize.query<any>(`SELECT r.read_at FROM system_announcement_reads r JOIN system_announcements a ON a.id=r.announcement_id JOIN system_announcement_audience au ON au.announcement_id=a.id AND au.usuario_id=r.usuario_id WHERE r.announcement_id=:id AND r.usuario_id=:userId AND a.status IN ('published','expired')`,options);
+ });
+ if(!rows.length)throw new ProfileError(404,'Aviso no encontrado');res.json({status:'success',data:{read_at:rows[0].read_at}});
+}));
+
 router.use((error:any,_req:Request,res:Response,_next:NextFunction)=>{ res.status(error instanceof ProfileError?error.status:500).json({status:'error',message:error instanceof ProfileError?error.message:'No se pudo completar la operación.'}); });
 export default router;

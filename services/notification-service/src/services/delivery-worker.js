@@ -1,9 +1,10 @@
+const {DeliveryAudit,writeAudit,systemEvent}=require('./audit');
 const {deliveryWindow,retryOutcome}=require('./delivery-policy');
 const LATEST_PREF=`SELECT * FROM preferencias_usuario WHERE usuario_id=$1 ORDER BY id DESC LIMIT 1`;
 class DeliveryWorker {
   constructor({pool,send,now=()=>new Date()}) {this.pool=pool;this.send=send;this.now=now;}
   async runOnce({deliver=true}={}) {
-    const client=await this.pool.connect();let locked=false;
+    const client=await this.pool.connect();let locked=false;const audit=new DeliveryAudit(client);
     try {
       const schema=(await client.query("SELECT to_regclass('notification_deliveries') AS deliveries,to_regclass('notification_delivery_items') AS items,to_regclass('notification_delivery_cursors') AS cursors")).rows[0];
       if(!schema.deliveries||!schema.items||!schema.cursors)return {ready:false};
@@ -20,9 +21,10 @@ class DeliveryWorker {
         for(;;) {
           const due=(await client.query("SELECT * FROM notification_deliveries WHERE state IN ('pending','retry') AND available_at <= $1 ORDER BY available_at,id LIMIT 20",[dueBefore])).rows;
           if(!due.length)break;
-          for(const delivery of due)await this.deliver(client,delivery);
+          for(const delivery of due){await audit.start();audit.record(await this.deliver(client,delivery));}
         }
       }
+      await audit.finish();
       return {ready:true,busy:false};
     } finally {
       // Never return a session with a transaction or advisory lock to the pool.
@@ -100,6 +102,7 @@ class DeliveryWorker {
       await client.query('UPDATE notification_deliveries SET state=$2,error_code=$3,available_at=$4,sent_at=$5 WHERE id=$1',[delivery.id,outcome.state,outcome.code,new Date(now.getTime()+outcome.delay),outcome.state==='sent'?now:null]);
       if(outcome.state==='sent')await client.query('UPDATE notificaciones SET enviada=true,fecha_envio=$2 WHERE id=ANY($1::int[])',[items.map(i=>i.id),now.toISOString()]);
       await client.query('COMMIT');
+      return outcome.state;
     } catch(error){await client.query('ROLLBACK');throw error;}
   }
 }

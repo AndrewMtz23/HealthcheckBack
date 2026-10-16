@@ -1,3 +1,4 @@
+from utils.audit import consultation, finish_job
 from database.db import db
 from database.models import Fuente, Noticia, ModeloML, ClasificacionNoticia, HistorialConsulta, Tema, Keyword, NoticiaKeyword
 from sqlalchemy.exc import SQLAlchemyError
@@ -279,6 +280,8 @@ def save_consultation(usuario_id, noticia_id):
             fecha_consulta=datetime.utcnow()
         )
         db.session.add(nueva_consulta)
+        db.session.flush()
+        consultation(usuario_id, noticia_id, nueva_consulta.id)
         db.session.commit()
         return nueva_consulta.id
     except SQLAlchemyError as e:
@@ -333,6 +336,7 @@ def _analysis_result(noticia, clasificacion, usuario_id, reutilizado):
         consulta = HistorialConsulta(usuario_id=usuario_id, noticia_id=noticia.id, fecha_consulta=datetime.utcnow())
         db.session.add(consulta)
         db.session.flush()
+        consultation(usuario_id, noticia.id, consulta.id)
     tema = db.session.get(Tema, noticia.tema_id) if noticia.tema_id else None
     keywords = db.session.query(Keyword.palabra).join(
         NoticiaKeyword, NoticiaKeyword.keyword_id == Keyword.id
@@ -357,8 +361,12 @@ def get_cached_analysis(url, contenido, modelo_id, usuario_id, check_deadline=No
             check_deadline()
         found = _find_analysis(url, contenido, modelo_id, usuario_id)
         result = _analysis_result(found[0], found[1], usuario_id, True) if found else None
+        if result:
+            finish_job(result["clasificacion_id"], {"news_id":result["noticia_id"], "model_id":modelo_id, "cached":True})
         if check_deadline:
             check_deadline()
+        if result:
+            finish_job(result["clasificacion_id"], {"news_id":result["noticia_id"], "model_id":modelo_id, "cached":result["reutilizado"]})
         return result
 
 
@@ -419,4 +427,6 @@ def save_complete_analysis(titulo, contenido, url, fecha_publicacion, fuente_url
             result = _analysis_result(noticia, clasificacion, usuario_id, False)
         if check_deadline:
             check_deadline()
+        if result:
+            finish_job(result["clasificacion_id"], {"news_id":result["noticia_id"], "model_id":modelo_id, "cached":result["reutilizado"]})
         return result

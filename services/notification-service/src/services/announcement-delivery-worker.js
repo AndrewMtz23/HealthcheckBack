@@ -1,9 +1,10 @@
+const {DeliveryAudit,writeAudit,systemEvent}=require('./audit');
 const {retryOutcome}=require('./delivery-policy');
 
 class AnnouncementDeliveryWorker {
   constructor({pool,send,now=()=>new Date(),frontendUrl='http://localhost:3000'}) { this.pool=pool;this.send=send;this.now=now;this.frontendUrl=frontendUrl; }
   async runOnce({deliver=true}={}) {
-    const client=await this.pool.connect();let locked=false;
+    const client=await this.pool.connect();let locked=false;const audit=new DeliveryAudit(client);
     try {
       const schema=(await client.query("SELECT to_regclass('system_announcements') AS announcements,to_regclass('system_announcement_audience') AS audience,to_regclass('system_announcement_reads') AS reads,to_regclass('system_announcement_emails') AS emails,to_regclass('system_announcement_email_totals') AS totals")).rows[0];
       if(!schema.announcements||!schema.audience||!schema.reads||!schema.emails||!schema.totals)return {ready:false};
@@ -14,9 +15,10 @@ class AnnouncementDeliveryWorker {
       if(deliver) {
         for(;;) {
           const row=(await client.query("UPDATE system_announcement_emails SET state='sending',attempts=attempts+1,updated_at=now() WHERE (announcement_id,usuario_id)=(SELECT e.announcement_id,e.usuario_id FROM system_announcement_emails e JOIN system_announcements a ON a.id=e.announcement_id WHERE e.state IN ('queued','retry') AND e.available_at<=now() AND a.status='published' AND (a.expires_at IS NULL OR a.expires_at>now()) ORDER BY e.available_at,e.announcement_id,e.usuario_id FOR UPDATE OF e SKIP LOCKED LIMIT 1) RETURNING *")).rows[0];
-          if(!row)break; await this.deliverOne(client,row);
+          if(!row)break; await audit.start();audit.record(await this.deliverOne(client,row));
         }
       }
+      await audit.finish();
       return {ready:true,busy:false};
     } finally { try{await client.query('ROLLBACK');if(locked)await client.query('SELECT pg_advisory_unlock(734251,7)');client.release();}catch(error){client.release(error);} }
   }
@@ -31,7 +33,7 @@ class AnnouncementDeliveryWorker {
       const due=(await client.query("SELECT id FROM system_announcements WHERE status='scheduled' AND publish_at<=now() AND (expires_at IS NULL OR expires_at>now()) ORDER BY publish_at,id FOR UPDATE")).rows;
       for(const {id} of due) {
         const published=(await client.query("UPDATE system_announcements SET status='published',published_at=now() WHERE id=$1 AND status='scheduled' RETURNING id",[id])).rows[0];
-        if(published){await client.query("INSERT INTO system_announcement_audience(announcement_id,usuario_id,email_eligible) SELECT $1,id,(email IS NOT NULL AND btrim(email)<>'') FROM usuarios WHERE activo=true ON CONFLICT DO NOTHING",[id]);const count=(await client.query('SELECT count(*)::int AS total FROM system_announcement_audience WHERE announcement_id=$1',[id])).rows[0];await client.query('UPDATE system_announcements SET audience_count=$2 WHERE id=$1',[id,count.total]);await client.query("INSERT INTO system_announcement_emails(announcement_id,usuario_id) SELECT announcement_id,usuario_id FROM system_announcement_audience WHERE announcement_id=$1 AND email_eligible ON CONFLICT DO NOTHING",[id]);}
+        if(published){await writeAudit(client,systemEvent('ANNOUNCEMENT_PUBLISH','success',id));await client.query("INSERT INTO system_announcement_audience(announcement_id,usuario_id,email_eligible) SELECT $1,id,(email IS NOT NULL AND btrim(email)<>'') FROM usuarios WHERE activo=true ON CONFLICT DO NOTHING",[id]);const count=(await client.query('SELECT count(*)::int AS total FROM system_announcement_audience WHERE announcement_id=$1',[id])).rows[0];await client.query('UPDATE system_announcements SET audience_count=$2 WHERE id=$1',[id,count.total]);await client.query("INSERT INTO system_announcement_emails(announcement_id,usuario_id) SELECT announcement_id,usuario_id FROM system_announcement_audience WHERE announcement_id=$1 AND email_eligible ON CONFLICT DO NOTHING",[id]);}
       }
       await client.query('COMMIT');
     } catch(error){await client.query('ROLLBACK');throw error;}
@@ -52,6 +54,7 @@ class AnnouncementDeliveryWorker {
       const available=new Date(this.now().getTime()+outcome.delay);
       await client.query('UPDATE system_announcement_emails SET state=$3,error_code=$4,available_at=$5,sent_at=$6,updated_at=now() WHERE announcement_id=$1 AND usuario_id=$2',[row.announcement_id,row.usuario_id,outcome.state,outcome.code,available,outcome.state==='sent'?this.now():null]);
       await client.query('COMMIT');
+      return outcome.state;
     } catch(error){try{await client.query('ROLLBACK');}catch{} throw error;}
   }
 }

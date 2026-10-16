@@ -1,3 +1,4 @@
+from utils.audit import background_scraping
 import os
 import time
 import threading
@@ -9,6 +10,7 @@ from scrapers.twitter_scraper import TwitterScraper
 
 logger = logging.getLogger(__name__)
 
+@background_scraping
 def job_scrape_news(app):
     """Trabajo programado para scrapear noticias de Google News"""
     with app.app_context():
@@ -17,9 +19,12 @@ def job_scrape_news(app):
             scraper = GoogleNewsScraper()
             processed_ids = scraper.scrape_news(limit=10)  # Usa el método que guarda en BD
             logger.info(f"Scraping programado de Google News completado. Se procesaron {len(processed_ids)} noticias.")
+            return len(processed_ids)
         except Exception as e:
             logger.error(f"Error en el scraping programado de Google News: {str(e)}")
+            raise
 
+@background_scraping
 def job_scrape_tweets(app):
     """Trabajo programado para scrapear tweets"""
     with app.app_context():
@@ -34,8 +39,10 @@ def job_scrape_tweets(app):
                 min_length=50
             )
             logger.info(f"Scraping programado de Twitter completado. Se procesaron {len(processed_ids)} tweets.")
+            return len(processed_ids)
         except Exception as e:
             logger.error(f"Error en el scraping programado de Twitter: {str(e)}")
+            raise
 
 def run_scheduler(app):
     """Ejecuta el scheduler en un hilo separado"""

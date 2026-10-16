@@ -1,3 +1,4 @@
+from utils.audit import audited_job, finish_job
 from flask import Blueprint, request, jsonify
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -36,6 +37,7 @@ class FakeNewsDataset(torch.utils.data.Dataset):
         return item
 
 @train_bp.route("/train", methods=["POST"])
+@audited_job('TRAINING_RUN')
 def train_model():
     """Entrena o reentrea el modelo de clasificación de noticias falsas"""
     try:
@@ -196,6 +198,8 @@ def train_model():
         )
         
         db.session.add(new_model)
+        db.session.flush()
+        finish_job(new_model.id, {"model_id":new_model.id})
         db.session.commit()
         
         # Limpiar archivos temporales
