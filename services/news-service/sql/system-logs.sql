@@ -29,7 +29,7 @@ CREATE INDEX IF NOT EXISTS system_logs_entity ON system_logs(entity,entity_id);
 CREATE INDEX IF NOT EXISTS system_logs_service_date ON system_logs(service,(COALESCE(occurred_at,recorded_at)) DESC);
 CREATE OR REPLACE FUNCTION record_system_log(e jsonb) RETURNS bigint LANGUAGE plpgsql AS $function$
 DECLARE rule system_log_catalog%ROWTYPE; existing system_logs%ROWTYPE; result bigint;
- fingerprint text; k text; v jsonb; item jsonb;
+ fingerprint text; k text; v jsonb; item jsonb; resolved_user integer;
  required_keys text[]:=ARRAY['event_key','occurred_at','user_id','actor_type','actor_role','action','entity','entity_id','service','request_id','outcome','description','ip_address','user_agent','metadata','origin','source_reference'];
 BEGIN
  IF jsonb_typeof(e) IS DISTINCT FROM 'object' OR NOT (e ?& required_keys) OR EXISTS(SELECT 1 FROM jsonb_object_keys(e) x WHERE NOT x=ANY(required_keys)) THEN RAISE EXCEPTION 'Invalid audit fields' USING ERRCODE='22023'; END IF;
@@ -62,8 +62,21 @@ BEGIN
   IF existing.event_fingerprint<>fingerprint THEN RAISE EXCEPTION 'Audit event conflict' USING ERRCODE='23505'; END IF;
   RETURN existing.id;
  END IF;
+ resolved_user:=(e->>'user_id')::integer;
+ -- A monitor completion retains its initiating user even if that account was deleted.
+ -- Only a persisted run and its matching start event can authorize the missing FK.
+ IF resolved_user IS NOT NULL AND NOT EXISTS(SELECT 1 FROM usuarios WHERE id=resolved_user)
+    AND e->>'action'='LINK_MONITOR_RUN' AND e->>'service'='link-monitor'
+    AND e->>'actor_type'='user' AND e->>'origin'='live'
+    AND e->>'outcome' IN ('success','failure') AND to_regclass('link_monitor_runs') IS NOT NULL THEN
+  IF EXISTS(SELECT 1 FROM link_monitor_runs r JOIN system_logs l ON l.request_id=r.id
+    WHERE r.id=(e->>'request_id')::uuid AND r.id::text=e->>'entity_id' AND r.requested_by=resolved_user
+      AND l.action='LINK_MONITOR_RUN' AND l.service='link-monitor' AND l.outcome='started'
+      AND l.origin='live' AND l.actor_type='user' AND l.user_id IS NULL
+      AND l.actor_role IS NOT DISTINCT FROM e->>'actor_role') THEN resolved_user:=NULL; END IF;
+ END IF;
  INSERT INTO system_logs(event_key,event_fingerprint,occurred_at,user_id,actor_type,actor_role,action,entity,entity_id,service,request_id,outcome,sensitivity,catalog_version,description,ip_address,user_agent,metadata,origin,source_reference)
- VALUES((e->>'event_key')::uuid,fingerprint,(e->>'occurred_at')::timestamptz,(e->>'user_id')::integer,e->>'actor_type',e->>'actor_role',e->>'action',e->>'entity',e->>'entity_id',e->>'service',(e->>'request_id')::uuid,e->>'outcome',
+ VALUES((e->>'event_key')::uuid,fingerprint,(e->>'occurred_at')::timestamptz,resolved_user,e->>'actor_type',e->>'actor_role',e->>'action',e->>'entity',e->>'entity_id',e->>'service',(e->>'request_id')::uuid,e->>'outcome',
  CASE WHEN e->>'action'='AUTH_LOGIN' AND e->>'outcome' IN ('failure','denied') THEN 'sensible' ELSE rule.sensitivity END,rule.version,e->>'description',(e->>'ip_address')::inet,e->>'user_agent',e->'metadata',e->>'origin',e->>'source_reference')
  ON CONFLICT(event_key) DO NOTHING RETURNING id INTO result;
  IF result IS NULL THEN

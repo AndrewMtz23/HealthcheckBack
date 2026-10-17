@@ -9,6 +9,7 @@ function localServiceEnv(name,mode='diagnostic',secrets={}){
  if(live&&['auth','news','gateway'].includes(name))env.JWT_SECRET=secrets.JWT_SECRET;
  if(['ml','gateway'].includes(name))env.ML_GATEWAY_SECRET=live?secrets.ML_GATEWAY_SECRET:'phase00-ml-gateway-diagnostic-only-token';
  if(name==='news'||name==='link-monitor')Object.assign(env,{LINK_MONITOR_URL:'http://127.0.0.1:3005',LINK_MONITOR_INTERNAL_TOKEN:live?secrets.LINK_MONITOR_INTERNAL_TOKEN:'phase00-link-monitor-diagnostic-only',LINK_MONITOR_HOST:'127.0.0.1'});
+ env.AUDIT_ENABLED=live&&secrets.AUDIT_ENABLED==='true'?'true':'false';
  return env;
 }
 module.exports={localServiceEnv};

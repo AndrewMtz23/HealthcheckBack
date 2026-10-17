@@ -14,8 +14,12 @@ class AnnouncementDeliveryWorker {
       await this.publishDue(client);
       if(deliver) {
         for(;;) {
+          await client.query('BEGIN');
           const row=(await client.query("UPDATE system_announcement_emails SET state='sending',attempts=attempts+1,updated_at=now() WHERE (announcement_id,usuario_id)=(SELECT e.announcement_id,e.usuario_id FROM system_announcement_emails e JOIN system_announcements a ON a.id=e.announcement_id WHERE e.state IN ('queued','retry') AND e.available_at<=now() AND a.status='published' AND (a.expires_at IS NULL OR a.expires_at>now()) ORDER BY e.available_at,e.announcement_id,e.usuario_id FOR UPDATE OF e SKIP LOCKED LIMIT 1) RETURNING *")).rows[0];
-          if(!row)break; await audit.start();audit.record(await this.deliverOne(client,row));
+          if(!row){await client.query('COMMIT');break;}
+          await audit.start();
+          await client.query('COMMIT');
+          audit.record(await this.deliverOne(client,row));
         }
       }
       await audit.finish();

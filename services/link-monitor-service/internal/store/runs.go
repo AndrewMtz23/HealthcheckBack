@@ -173,7 +173,7 @@ func (s *Store) FinishRun(ctx context.Context, id, state, code string) error {
 	}
 	var actor *int64
 	if os.Getenv("AUDIT_ENABLED") == "true" {
-		if e = tx.QueryRow(ctx, `SELECT u.id FROM link_monitor_runs r LEFT JOIN usuarios u ON u.id=r.requested_by WHERE r.id=$1`, id).Scan(&actor); e != nil {
+		if e = tx.QueryRow(ctx, `SELECT requested_by FROM link_monitor_runs WHERE id=$1`, id).Scan(&actor); e != nil {
 			return e
 		}
 	}

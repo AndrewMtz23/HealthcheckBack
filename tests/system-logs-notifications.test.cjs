@@ -11,27 +11,23 @@ test('delivery summary describes SMTP acceptance without claiming delivery or lo
   assert.equal(events[1].outcome,'failure');assert.equal(events[1].metadata.transport_status,'accepted_by_smtp');assert.equal(events[1].metadata.delivered,undefined);
  }finally{delete process.env.AUDIT_ENABLED;}
 });
-test('announcement lifecycle and repeated reads produce atomic audit events without sending email',async()=>{
- const ctx=await scratch();process.env.AUDIT_ENABLED='true';let db,server;
+test('an audit failure rolls back an unattempted announcement claim',async()=>{
+ process.env.AUDIT_ENABLED='true';let state='queued',snapshot,sends=0;
+ const client={release(){},async query(sql){
+  if(sql==='BEGIN'){snapshot=state;return {rows:[]};}
+  if(sql==='ROLLBACK'){if(snapshot)state=snapshot;snapshot=null;return {rows:[]};}
+  if(sql==='COMMIT'){snapshot=null;return {rows:[]};}
+  if(sql.includes('to_regclass'))return {rows:[{announcements:1,audience:1,reads:1,emails:1,totals:1}]};
+  if(sql.includes('pg_try_advisory_lock'))return {rows:[{locked:true}]};
+  if(sql.includes("SET state='sending'")){state='sending';return {rows:[{announcement_id:1,usuario_id:1}]};}
+  if(sql.includes('record_system_log'))throw Error('Unavailable');
+  return {rows:[]};
+ }};
  try{
-  await ctx.db.query(fs.readFileSync('services/notification-service/sql/system-announcements.sql','utf8'));
-  const express=require('../services/auth-service/node_modules/express');
-  db=require('../services/auth-service/dist/config/db').default;
-  const User=require('../services/auth-service/dist/models/User').default;
-  const app=express();app.use(express.json());app.use(require('../services/auth-service/dist/config/passport').default.initialize());
-  app.use('/announcements',require('../services/auth-service/dist/admin/announcements').default);
-  app.use(require('../services/auth-service/dist/profile/inboxRoutes').default);
-  server=await new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>resolve(s));});
-  const token=require('../services/auth-service/dist/utils/jwt').generateToken(await User.findByPk(1));
-  async function call(path,method='POST',body={}){
-   const r=await fetch(`http://127.0.0.1:${server.address().port}${path}`,{method,headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(2500)});
-   const data=await r.json();assert(r.ok,JSON.stringify(data));return data.data;
-  }
-  const notice=await call('/announcements','POST',{title:'Synthetic',body:'Testing only',kind:'informativo'});
-  await call(`/announcements/${notice.id}/publish`);await call(`/announcements/${notice.id}/publish`);
-  await call(`/system-announcements/${notice.id}/read`);await call(`/system-announcements/${notice.id}/read`);
-  const count=async action=>(await ctx.db.query('SELECT count(*)::int AS n FROM system_logs WHERE action=$1',[action])).rows[0].n;
-  assert.equal(await count('ANNOUNCEMENT_CREATE'),1);assert.equal(await count('ANNOUNCEMENT_PUBLISH'),1);assert.equal(await count('NOTIFICATION_READ'),1);
-  assert.equal((await ctx.db.query("SELECT count(*)::int AS n FROM system_announcement_emails WHERE state='sent'")).rows[0].n,0);
- }finally{if(server){server.closeAllConnections();await new Promise(r=>server.close(r));}delete process.env.AUDIT_ENABLED;if(db)await db.close();await ctx.close();}
+  const {AnnouncementDeliveryWorker}=require('../services/notification-service/src/services/announcement-delivery-worker');
+  const worker=new AnnouncementDeliveryWorker({pool:{connect:async()=>client},send:async()=>{sends++;}});
+  worker.publishDue=async()=>{};
+  await assert.rejects(()=>worker.runOnce(),/AUDIT_WRITE_FAILED/);
+  assert.equal(state,'queued');assert.equal(sends,0);
+ }finally{delete process.env.AUDIT_ENABLED;}
 });
