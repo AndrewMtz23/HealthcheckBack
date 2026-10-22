@@ -1,4 +1,4 @@
-import {publicNews,isPublicNews} from '../editorial/policy';
+import {historyNews} from '../editorial/policy';
 import { Request, Response } from 'express';
 import { Op, literal } from 'sequelize';
 import {parseQuery,AdminError} from '../admin/query';
@@ -86,7 +86,7 @@ export const getUserHistory = async (req: Request, res: Response): Promise<void>
         total: count,
         currentPage: page,
         totalPages: Math.ceil(count / limit),
-        history: rows.map(row=>{const r:any=row.toJSON();return {...r,noticia:r.noticia?publicNews(r.noticia):{available:false}};})
+        history: rows.map(row=>{const r:any=row.toJSON();return {...r,noticia:r.noticia?historyNews(r.noticia,r.usuario_id,usuario_id):{available:false}};})
       }
     });
   } catch (error) {

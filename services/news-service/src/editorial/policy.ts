@@ -15,3 +15,19 @@ export function publicNews(news: any): any {
  return {...safe,available:true,human_reviewed:!!editorial_reviewed_at && editorial_reviewed_version===editorial_version,
   analysis_status:current?'current':classifications.length?'outdated':'none',clasificaciones:current?[current]:[]};
 }
+
+/** Personal history may show the original imported analysis to its owner only.
+ * Editorial edits and withdrawals continue to follow public visibility rules.
+ */
+export function historyNews(news: any, historyOwner: number, viewer: number): any {
+ const n = typeof news.toJSON === 'function' ? news.toJSON() : news;
+ if (isPublicNews(n)) return publicNews(n);
+ const current = currentClassification(n, n.clasificaciones || []);
+ if (!viewer || historyOwner !== viewer || n.editorial_state !== 'draft' ||
+     n.editorial_origin !== 'imported' || n.editorial_version !== 1 ||
+     n.content_version !== 1 || !current) return {id:n.id,available:false};
+ return {id:n.id,titulo:n.titulo,contenido:n.contenido,url:n.url,
+  fecha_publicacion:n.fecha_publicacion,tema:n.tema,fuente:n.fuente,
+  available:true,private_analysis:true,human_reviewed:false,
+  analysis_status:'current',clasificaciones:[current]};
+}
