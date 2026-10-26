@@ -108,6 +108,24 @@ export const validateAndSanitizeClassifyRequest = (
 
 // Rutas de classify
 router.post(
+  '/classify/extract',
+  verifyToken,
+  defaultRateLimiter,
+  (req, res, next) => {
+    if (req.user?.rol !== 'admin') {
+      res.status(403).json({message: 'Se requieren permisos de administrador.'});
+      return;
+    }
+    if (typeof req.body?.url !== 'string' || !/^https?:\/\//i.test(req.body.url.trim()) || req.body.url.trim().length > 2048) {
+      res.status(400).json({message: 'Introduce una URL válida de hasta 2048 caracteres.'});
+      return;
+    }
+    req.body = {url: req.body.url.trim()};
+    next();
+  },
+  proxy.createServiceProxy('ml', config.services.ml)
+);
+router.post(
   '/classify/predict',
   verifyToken,
   defaultRateLimiter,
