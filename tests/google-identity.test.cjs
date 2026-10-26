@@ -4,14 +4,17 @@ process.env.GOOGLE_CLIENT_ID='synthetic-client';process.env.GOOGLE_CLIENT_SECRET
 const passport=require('../services/auth-service/dist/config/passport').default;
 const User=require('../services/auth-service/dist/models/User').default;
 const strategy=passport._strategy('google');
-const verify=profile=>new Promise((resolve,reject)=>strategy._verify('unused','unused',profile,(err,user)=>err?reject(err):resolve(user)));
+const db=require('../services/auth-service/dist/config/db').default;
+const verify=profile=>new Promise((resolve,reject)=>strategy._verify({headers:{},socket:{}},'unused','unused',profile,(err,user)=>err?reject(err):resolve(user)));
 test('matching email cannot silently link a different Google identity',async t=>{
+ t.mock.method(db,'transaction',async fn=>fn({LOCK:{UPDATE:'UPDATE'}}));
  let saves=0;const local={id:4,email:'local@example.invalid',activo:true,save:async()=>{saves++;}};
  t.mock.method(User,'findOne',async({where})=>where.google_id?null:local);
  const result=await verify({id:'google-attacker',emails:[{value:local.email,verified:true}],displayName:'Synthetic'});
  assert.equal(result,false);assert.equal(saves,0);assert.equal(local.google_id,undefined);
 });
 test('Google signup requires verified email; existing stable identity preserves its role',async t=>{
+ t.mock.method(db,'transaction',async fn=>fn({LOCK:{UPDATE:'UPDATE'}}));
  let created=0;t.mock.method(User,'findOne',async()=>null);
  t.mock.method(User,'create',async()=>{created++;throw Error('unverified profile must not create user');});
  assert.equal(await verify({id:'unverified',emails:[{value:'new@example.invalid',verified:false}]}),false);assert.equal(created,0);

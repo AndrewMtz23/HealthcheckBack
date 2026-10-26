@@ -2,6 +2,7 @@ import os
 from flask import Flask, request, jsonify
 from api.health import health_bp
 from api.routes.classify_routes import classify_bp
+from api.routes.editorial_extract_routes import editorial_extract_bp
 from api.routes.train_routes import train_bp
 from api.routes.chatbot_routes import chatbot_bp
 from database.db import db, init_db
@@ -30,6 +31,7 @@ init_db(app)
 # Registrar los Blueprints
 app.register_blueprint(health_bp)
 app.register_blueprint(classify_bp, url_prefix="/api/ml/classify")
+app.register_blueprint(editorial_extract_bp, url_prefix="/api/ml/classify")
 app.register_blueprint(train_bp, url_prefix="/api/ml/train")
 app.register_blueprint(chatbot_bp, url_prefix="/api/ml/chatbot")
 

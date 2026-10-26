@@ -21,4 +21,5 @@ def require_gateway(admin=False):
     if admin and role != 'admin':
         return jsonify(status='error', message='Se requiere administrador'), 403
     g.user_id = int(identity)
+    g.user_role = role
     return None

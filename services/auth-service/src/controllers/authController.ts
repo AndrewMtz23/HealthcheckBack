@@ -6,6 +6,7 @@ import { revokeSession } from '../utils/sessions';
 import env from '../config/env';
 import { Op } from 'sequelize';
 import {ProfileError,validateProfile} from '../profile/validation';
+import {audit, auditAttempt} from '../audit/writer';
 const profilePayload=(user:User)=>({id:user.id,email:user.email,nombre:user.nombre,telefono:user.telefono,imagen_url:user.imagen_url,rol:user.rol,fecha_registro:user.fecha_registro,ultima_conexion:user.ultima_conexion,password_enabled:!!user.contrasena});
 
 /**
@@ -29,7 +30,8 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     }
 
     // Crear nuevo usuario
-    const user = await User.create({
+    const user = await sequelize.transaction(async transaction => {
+    const created = await User.create({
       email,
       nombre,
       contrasena,
@@ -38,6 +40,9 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       fecha_registro: new Date(),
       ultima_conexion: new Date(),
       activo: true,
+    }, {transaction});
+    await audit(req, 'AUTH_REGISTER', created.id, {provider:'password'}, transaction, 'success', created);
+    return created;
     });
 
     // Generar token JWT
@@ -75,10 +80,12 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       if (!user || !user.activo || !(await user.isValidPassword(contrasena))) return null;
       user.ultima_conexion = new Date();
       await user.save({transaction});
+      await audit(req, 'AUTH_LOGIN', user.id, {provider:'password'}, transaction, 'success', user);
       issuedToken = generateToken(user);
       return {user:profilePayload(user), token:issuedToken};
     });
     if (!session) {
+      await auditAttempt(req, 'AUTH_LOGIN');
       res.status(401).json({status:'error', message:'Credenciales incorrectas o cuenta inactiva.'});
       return;
     }
@@ -150,9 +157,12 @@ export const getProfile = async (req: Request, res: Response): Promise<void> => 
 export const updateProfile = async (req: Request, res: Response): Promise<void> => {
   try {
     const user = req.user as User;
-    user.set(validateProfile(req.body));
-    
-    await user.save();
+    const changes = validateProfile(req.body);
+    await sequelize.transaction(async transaction => {
+      user.set(changes);
+      await user.save({transaction});
+      await audit(req, 'PROFILE_UPDATE', user.id, {fields:Object.keys(changes)}, transaction);
+    });
 
     res.status(200).json({
       status: 'success',
@@ -177,7 +187,10 @@ export const logout = async (req: Request, res: Response): Promise<void> => {
   try {
     const token = extractTokenFromRequest(req);
     const payload = token && verifyToken(token);
-    if (payload) revokeSession(payload.jti);
+    if (payload) {
+      await audit(req, 'AUTH_LOGOUT', (req.user as User)?.id ?? null);
+      revokeSession(payload.jti);
+    }
 
     res.status(200).json({
       status: 'success',

@@ -1,3 +1,4 @@
+from utils.audit import audited_job, finish_job
 from flask import Blueprint, request, jsonify, Response
 from core.classify_service import predict_news, prepare_model, ModelUnavailable
 from utils.article_extractor import ArticleAccessDenied, extract_news_data, extract_news_data_safe
@@ -42,6 +43,7 @@ def analysis_response(saved):
 
 
 @classify_bp.route("/predict", methods=["POST"])
+@audited_job('ANALYSIS_RUN')
 def classify():
     expected = os.environ.get("ML_GATEWAY_SECRET", "")
     if len(expected) < 32:
@@ -121,6 +123,7 @@ def classify():
         return jsonify(error="No se pudo completar el análisis. Intenta nuevamente.", code="INTERNAL_ERROR"), 500
 
 @classify_bp.route("/scrape/google", methods=["POST"])
+@audited_job('SCRAPING_RUN')
 def scrape_google_news():
     """Inicia el scraping de noticias desde Google News y devuelve un CSV con los resultados."""
     try:
@@ -189,6 +192,7 @@ def scrape_google_news():
         }), 500
 
 @classify_bp.route("/scrape/twitter", methods=["POST"])
+@audited_job('SCRAPING_RUN')
 def scrape_twitter():
     """Inicia el scraping de tweets y devuelve un CSV con los resultados."""
     try:

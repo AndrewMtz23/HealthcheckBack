@@ -17,7 +17,7 @@ export function validateUser(body: any, create = false): any {
         }
     if (data.email !== undefined) {
         data.email = data.email.toLowerCase();
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email))
+        if (!/^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(data.email))
             throw new AdminError(400, 'Email inválido');
     }
     if (data.rol !== undefined && !['admin', 'usuario'].includes(data.rol))

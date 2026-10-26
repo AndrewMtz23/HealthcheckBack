@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jackc/pgx/v5"
+	"healthcheck/link-monitor/internal/audit"
 	"healthcheck/link-monitor/internal/checker"
+	"os"
 	"strings"
 )
 
@@ -87,6 +89,14 @@ func (s *Store) StartRun(ctx context.Context, actor int64) (StartResult, error) 
 	if e != nil {
 		return StartResult{}, e
 	}
+	if _, e = audit.WriteAudit(ctx, tx, audit.RunEvent(run.ID, &actor, run.CreatedAt, "started", run.TotalURLs, "")); e != nil {
+		return StartResult{}, e
+	}
+	if run.State == "completed" {
+		if _, e = audit.WriteAudit(ctx, tx, audit.RunEvent(run.ID, &actor, *run.FinishedAt, "success", 0, "")); e != nil {
+			return StartResult{}, e
+		}
+	}
 	return StartResult{Run: *run, Created: true}, tx.Commit(ctx)
 }
 func (s *Store) CurrentRun(ctx context.Context) (*Run, error) {
@@ -149,13 +159,56 @@ func (s *Store) SaveResult(ctx context.Context, runID string, id int64, result c
 	return tx.Commit(ctx)
 }
 func (s *Store) FinishRun(ctx context.Context, id, state, code string) error {
-	tag, e := s.pool.Exec(ctx, `UPDATE link_monitor_runs SET state=$2,error_code=NULLIF($3,''),finished_at=clock_timestamp() WHERE id=$1 AND state='running' AND ($2!='completed' OR processed_urls=total_urls)`, id, state, code)
-	if e == nil && tag.RowsAffected() != 1 {
+	tx, e := s.pool.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(context.Background())
+	run, e := scanRun(tx.QueryRow(ctx, `UPDATE link_monitor_runs SET state=$2,error_code=NULLIF($3,''),finished_at=clock_timestamp() WHERE id=$1 AND state='running' AND ($2!='completed' OR processed_urls=total_urls) RETURNING `+runColumns, id, state, code))
+	if errors.Is(e, pgx.ErrNoRows) {
 		return ErrConflict
 	}
-	return e
+	if e != nil {
+		return e
+	}
+	var actor *int64
+	if os.Getenv("AUDIT_ENABLED") == "true" {
+		if e = tx.QueryRow(ctx, `SELECT requested_by FROM link_monitor_runs WHERE id=$1`, id).Scan(&actor); e != nil {
+			return e
+		}
+	}
+	outcome := "failure"
+	if state == "completed" {
+		outcome = "success"
+	}
+	if _, e = audit.WriteAudit(ctx, tx, audit.RunEvent(id, actor, *run.FinishedAt, outcome, run.ProcessedURLs, code)); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
 }
 func (s *Store) InterruptAbandoned(ctx context.Context) error {
-	_, e := s.pool.Exec(ctx, `UPDATE link_monitor_runs SET state='interrupted',error_code='WORKER_INTERRUPTED',finished_at=clock_timestamp() WHERE state='running'`)
-	return e
+	rows, e := s.pool.Query(ctx, `SELECT id::text FROM link_monitor_runs WHERE state='running'`)
+	if e != nil {
+		return e
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if e = rows.Scan(&id); e != nil {
+			rows.Close()
+			return e
+		}
+		ids = append(ids, id)
+	}
+	e = rows.Err()
+	rows.Close()
+	if e != nil {
+		return e
+	}
+	for _, id := range ids {
+		if e = s.FinishRun(ctx, id, "interrupted", "WORKER_INTERRUPTED"); e != nil && !errors.Is(e, ErrConflict) {
+			return e
+		}
+	}
+	return nil
 }

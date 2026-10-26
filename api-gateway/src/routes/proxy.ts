@@ -3,6 +3,7 @@ import axios from 'axios';
 import { HttpError } from '../middleware/errorHandler';
 import { logger } from '../middleware/logger';
 import {createHmac} from 'crypto';
+const auditRuntime = require('../../../shared/audit/runtime.cjs');
 
 /**
  * Función para crear un proxy hacia un servicio específico
@@ -22,6 +23,7 @@ export const createServiceProxy = (
 
       // Preparar headers manteniendo Authorization si existe
       const headers: Record<string, string> = {};
+      Object.assign(headers, auditRuntime.signContext(req, serviceName === 'ml' ? process.env.ML_GATEWAY_SECRET : process.env.JWT_SECRET));
       const googleRoute = serviceName === 'auth' && ['/google','/google/callback','/google/failure'].includes(req.path);
       if (googleRoute && req.headers.cookie) headers.Cookie = req.headers.cookie;
       if (serviceName === 'auth' && req.path.startsWith('/password/')) {

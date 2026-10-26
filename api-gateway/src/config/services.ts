@@ -50,6 +50,7 @@ const services: ServiceDefinition[] = [
     url: config.services.ml,
     routes: [
       { path: '/classify/predict', auth: true },
+      { path: '/classify/extract', auth: true },
       { path: '/classify/scrape/google', auth: true },
       { path: '/classify/scrape/twitter', auth: true },
       { path: '/train/train', auth: true },

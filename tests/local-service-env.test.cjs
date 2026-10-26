@@ -23,4 +23,6 @@ test('normal local mode enables manual work with private shared tokens and keeps
  assert.throws(()=>localServiceEnv('news','local',{}),/secret/i);
  const front=localServiceEnv('frontend','local',secrets);
  assert.equal(front.JWT_SECRET,undefined);assert.equal(front.LINK_MONITOR_INTERNAL_TOKEN,undefined);
+ assert.equal(localServiceEnv('news','local',{...secrets,AUDIT_ENABLED:'true'}).AUDIT_ENABLED,'true');
+ assert.equal(localServiceEnv('news','diagnostic',{...secrets,AUDIT_ENABLED:'true'}).AUDIT_ENABLED,'false');
 });

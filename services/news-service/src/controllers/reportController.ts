@@ -1,3 +1,5 @@
+import sequelize from '../config/db';
+import {writeAudit} from '../audit/writer';
 import {resolveReport} from '../admin/write';
 import {AdminError,positiveId} from '../admin/query';
 import { Request, Response } from 'express';
@@ -58,12 +60,16 @@ export const createReport = async (req: Request, res: Response): Promise<void> =
     }
 
     // Crear nuevo reporte
-    const report = await Report.create({
+    const report = await sequelize.transaction(async transaction=>{
+    const created = await Report.create({
       fuente_id,
       usuario_id,
       motivo,
       estado: 'pendiente',
       fecha_reporte: new Date()
+    },{transaction});
+    await writeAudit(req,req.user!,'REPORT_CREATE',created.id,{state:'pendiente'},transaction);
+    return created;
     });
 
     res.status(201).json({
@@ -144,7 +150,7 @@ export const getReports = async (req: Request, res: Response): Promise<void> => 
 export const updateReportStatus = async (req: Request, res: Response): Promise<void> => {
   try {
     if(!req.user||req.user.rol!=='admin'){res.status(403).json({status:'error',message:'Acceso denegado'});return;}
-    const report=await resolveReport(positiveId(req.params.id),req.body.estado,req.user.id,req.body.resolution_note||req.body.comentario);
+    const report=await resolveReport(positiveId(req.params.id),req.body.estado,req.user.id,req.body.resolution_note||req.body.comentario,req);
     res.json({status:'success',data:{report}});
   } catch(error){res.status(error instanceof AdminError?error.status:500).json({status:'error',message:error instanceof AdminError?error.message:'No se pudo resolver el reporte'});}
 };

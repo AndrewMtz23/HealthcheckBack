@@ -1,3 +1,5 @@
+import sequelize from '../config/db';
+import {writeAudit} from '../audit/writer';
 import { Request, Response } from 'express';
 import Fuente from '../models/Fuente';
 
@@ -41,7 +43,8 @@ export const createFuente = async (req: Request, res: Response): Promise<void> =
     }
 
     // Crear fuente
-    const nuevaFuente = await Fuente.create({
+    const nuevaFuente = await sequelize.transaction(async transaction=>{
+    const created=await Fuente.create({
       nombre,
       url: url || null,
       descripcion: descripcion || null,
@@ -49,6 +52,9 @@ export const createFuente = async (req: Request, res: Response): Promise<void> =
       verificada: false,
       noticias_verdaderas: 0,
       noticias_falsas: 0
+    },{transaction});
+    await writeAudit(req,req.user!,'SOURCE_CREATE',created.id,{fields:Object.keys(req.body).filter(k=>['nombre','url','descripcion','confiabilidad','palabras_clave'].includes(k))},transaction);
+    return created;
     });
 
     res.status(201).json({
@@ -85,12 +91,15 @@ export const updateFuente = async (req: Request, res: Response): Promise<void> =
     }
 
     // Actualizar fuente
+    await sequelize.transaction(async transaction=>{
     await fuente.update({
       nombre: nombre || fuente.nombre,
       url: url ?? fuente.url,
       descripcion: descripcion ?? fuente.descripcion,
       confiabilidad: confiabilidad ?? fuente.confiabilidad,
       verificada: verificada !== undefined ? verificada : fuente.verificada
+    },{transaction});
+    await writeAudit(req,req.user!,'SOURCE_UPDATE',fuente.id,{fields:Object.keys(req.body).filter(k=>['nombre','url','descripcion','confiabilidad','verificada','palabras_clave','activo'].includes(k))},transaction);
     });
 
     res.status(200).json({
