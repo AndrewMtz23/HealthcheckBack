@@ -3,7 +3,11 @@ Object.assign(process.env,{GOOGLE_CLIENT_ID:'synthetic-client',GOOGLE_CLIENT_SEC
 const express=require('../services/auth-service/node_modules/express');
 const passport=require('../services/auth-service/dist/config/passport').default;
 const User=require('../services/auth-service/dist/models/User').default;
+const db=require('../services/auth-service/dist/config/db').default;
 test('gateway preserves OAuth cookie/state, rejects replay and exposes recovery with server authorization',async t=>{
+ // Keep this HTTP regression independent of a running PostgreSQL server.
+ // Real audit transactions are covered by the Logs integration suite.
+ t.mock.method(db,'transaction',async fn=>fn({LOCK:{UPDATE:'UPDATE'}}));
  const servers=[];const listen=app=>new Promise(resolve=>{const s=app.listen(0,'127.0.0.1',()=>{servers.push(s);resolve(`http://127.0.0.1:${s.address().port}`);});});
  let exchanged=0;
  const google=passport._strategy('google');

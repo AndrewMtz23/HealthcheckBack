@@ -1,6 +1,13 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {validateUser,protectAdmin}=require('../services/auth-service/dist/admin/validation');
+
+test('admin email validation accepts subdomains and rejects empty domain labels',()=>{
+ for(const email of ['person@example.test','first.last+tag@sub.example.test'])
+  assert.equal(validateUser({email}).email,email);
+ for(const email of ['person@example..test','person@.example.test','person@example.test.','person@@example.test','person@exam ple.test','!@!.'+'!.'.repeat(120)])
+  assert.throws(()=>validateUser({email}),error=>error.status===400);
+});
 test('admin image accepts URLs and removal, rejects unsafe values',()=>{
  assert.equal(validateUser({imagen_url:'https://example.test/avatar.png'}).imagen_url,'https://example.test/avatar.png');
  assert.equal(validateUser({imagen_url:''}).imagen_url,null);

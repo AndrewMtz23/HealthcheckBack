@@ -37,6 +37,7 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: services/link-monitor-service/go.mod
+          cache-dependency-path: services/link-monitor-service/go.sum
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: node-compiled-services
@@ -52,7 +53,12 @@ jobs:
         run: |
           mkdir -p ../.healthcheck-logs/phase00-pg
           "$(pg_config --bindir)/initdb" -D ../.healthcheck-logs/phase00-pg -U phase00 -A trust
-          "$(pg_config --bindir)/pg_ctl" -D ../.healthcheck-logs/phase00-pg -l ../.healthcheck-logs/logs-pg.log -o '-p 5543 -h 127.0.0.1' -w start
+          # The runner cannot write to PostgreSQL's system socket directory.
+          # These tests connect over TCP, so no Unix socket is needed.
+          "$(pg_config --bindir)/pg_ctl" -D ../.healthcheck-logs/phase00-pg -l ../.healthcheck-logs/logs-pg.log -o "-p 5543 -h 127.0.0.1 -c unix_socket_directories=''" -w start || {
+            cat ../.healthcheck-logs/logs-pg.log
+            exit 1
+          }
       - name: Verify Logs transactions, permissions, exports and historical imports
         run: node --test tests/system-logs-*-integration.cjs
       - name: Stop isolated PostgreSQL
